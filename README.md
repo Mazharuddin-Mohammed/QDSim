@@ -264,3 +264,51 @@ Install dependencies on Ubuntu:
 sudo apt update
 sudo apt install build-essential cmake libopenmpi-dev libeigen3-dev python3-dev python3-pip
 pip install pybind11 numpy matplotlib pyside6 pytest
+```
+
+## Build Instructions
+
+1. Create a build directory:
+   ```bash
+   mkdir -p build
+   cd build
+   ```
+
+2. Configure and build the project:
+   ```bash
+   cmake ..
+   make -j4
+   ```
+
+3. Install the Python package:
+   ```bash
+   cd ..
+   pip install -e .
+   ```
+
+## Run Instructions
+
+```bash
+python run_simulator.py
+```
+
+This will run the simulator and save the results to `energy_shift.png`.
+
+## Method Name Consistency
+
+The C++ code uses both camelCase and snake_case for method names. For consistency, we've added both versions of the methods in the bindings:
+
+- `getNumNodes()` and `get_num_nodes()`
+- `getNumElements()` and `get_num_elements()`
+- `getElementOrder()` and `get_element_order()`
+
+## Python Bindings
+
+The C++ code is exposed to Python using pybind11. The bindings are defined in `backend/include/bindings.h`.
+
+Important headers for proper conversion:
+- `<pybind11/pybind11.h>`: Core pybind11 functionality
+- `<pybind11/eigen.h>`: Conversion of Eigen types
+- `<pybind11/stl.h>`: Conversion of STL containers
+- `<pybind11/complex.h>`: Conversion of complex numbers
+- `<pybind11/functional.h>`: Conversion of function objects
