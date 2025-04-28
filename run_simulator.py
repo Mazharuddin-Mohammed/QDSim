@@ -21,7 +21,10 @@ def main():
 
     fig, ax = plt.subplots()
     plot_energy_shift(ax, V_r_values, energies, linewidths)
-    plt.show()
+    plt.savefig('energy_shift.png')
+    print("Plot saved to energy_shift.png")
+    # Uncomment to show the plot interactively
+    # plt.show()
 
 if __name__ == "__main__":
     main()
