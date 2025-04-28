@@ -31,30 +31,39 @@ set(SOURCES
     backend/src/bindings.cpp
 )
 
-add_library(qdsim MODULE ${SOURCES})
-target_link_libraries(qdsim PRIVATE pybind11::module)
+pybind11_add_module(qdsim_cpp ${SOURCES})
+target_link_libraries(qdsim_cpp PRIVATE pybind11::module)
 if(USE_MPI)
-    target_link_libraries(qdsim PRIVATE ${MPI_CXX_LIBRARIES})
+    target_link_libraries(qdsim_cpp PRIVATE ${MPI_CXX_LIBRARIES})
 endif()
 
-enable_testing()
-find_package(Catch2 REQUIRED)
-set(TEST_SOURCES
-    backend/tests/test_mesh.cpp
-    backend/tests/test_physics.cpp
-    backend/tests/test_solver.cpp
-    backend/tests/test_adaptive_mesh.cpp
-    backend/tests/test_normalization.cpp
-    backend/tests/test_poisson.cpp
-    backend/tests/test_materials.cpp
-)
+# Make testing optional
+option(BUILD_TESTING "Build the testing tree" OFF)
 
-foreach(test_src ${TEST_SOURCES})
-    get_filename_component(test_name ${test_src} NAME_WE)
-    add_executable(${test_name} ${test_src})
-    target_link_libraries(${test_name} PRIVATE Catch2::Catch2)
-    if(USE_MPI)
-        target_link_libraries(${test_name} PRIVATE ${MPI_CXX_LIBRARIES})
+if(BUILD_TESTING)
+    enable_testing()
+    find_package(Catch2 QUIET)
+    if(Catch2_FOUND)
+        set(TEST_SOURCES
+            backend/tests/test_mesh.cpp
+            backend/tests/test_physics.cpp
+            backend/tests/test_solver.cpp
+            backend/tests/test_adaptive_mesh.cpp
+            backend/tests/test_normalization.cpp
+            backend/tests/test_poisson.cpp
+            backend/tests/test_materials.cpp
+        )
+
+        foreach(test_src ${TEST_SOURCES})
+            get_filename_component(test_name ${test_src} NAME_WE)
+            add_executable(${test_name} ${test_src})
+            target_link_libraries(${test_name} PRIVATE Catch2::Catch2)
+            if(USE_MPI)
+                target_link_libraries(${test_name} PRIVATE ${MPI_CXX_LIBRARIES})
+            endif()
+            add_test(NAME ${test_name} COMMAND ${test_name})
+        endforeach()
+    else()
+        message(STATUS "Catch2 not found, tests will not be built")
     endif()
-    add_test(NAME ${test_name} COMMAND ${test_name})
-endforeach()
+endif()
