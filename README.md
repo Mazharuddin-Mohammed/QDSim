@@ -64,7 +64,7 @@ The effective mass is modeled as:
 
 \[
 m^*(x,y) =
-\begin{cases} 
+\begin{cases}
 m_{\text{Cr}} & \text{if } \sqrt{x^2 + y^2} \leq R \\
 m_{\text{AlGaAs}} & \text{otherwise}
 \end{cases}
@@ -80,7 +80,7 @@ The potential \( V(x,y) \) supports two models:
 1. **Square Potential**:
 \[
 V(x,y) =
-\begin{cases} 
+\begin{cases}
 0 & \text{if } \sqrt{x^2 + y^2} \leq R \\
 V_0 & \text{if } \sqrt{x^2 + y^2} > R \text{ and } |x|, |y| \leq W/2 \\
 V_{\text{bi}} & \text{otherwise}
@@ -100,7 +100,7 @@ The CAP is applied near domain boundaries to absorb outgoing waves:
 
 \[
 \eta(x,y) =
-\begin{cases} 
+\begin{cases}
 \eta_0 \left( \frac{|x| - L_x/2}{d} \right)^2 & \text{if } |x| > L_x/2 - d \\
 \eta_0 \left( \frac{|y| - L_y/2}{d} \right)^2 & \text{if } |y| > L_y/2 - d \\
 0 & \text{otherwise}
@@ -186,6 +186,9 @@ H \psi = E M \psi
 - **MPI**:
   - Distributes element matrix computations across processes.
   - Synchronizes global matrices and refined mesh data.
+  - Can be enabled/disabled at both compile time and runtime:
+    - Compile time: Use `-DUSE_MPI=ON/OFF` with CMake
+    - Runtime: Set `config.use_mpi = True/False` in Python
 - **Caching**:
   - Stores refined meshes to disk, keyed by wavefunction norm, to avoid redundant refinements.
 
