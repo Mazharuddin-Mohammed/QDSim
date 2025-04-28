@@ -86,6 +86,12 @@ data/meshes/
 !package.json
 !package-lock.json
 
+# Output files
+*.png
+*.pdf
+plots/
+results_2d/
+
 # Test outputs
 Testing/
 CTestTestfile.cmake
