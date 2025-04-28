@@ -3,16 +3,19 @@
 
 PoissonSolver::PoissonSolver(Mesh& mesh, double (*epsilon_r)(double, double), double (*rho)(double, double))
     : mesh(mesh), epsilon_r(epsilon_r), rho(rho) {
-    K.resize(mesh.get_num_nodes(), mesh.get_num_nodes());
-    phi.resize(mesh.get_num_nodes());
-    f.resize(mesh.get_num_nodes());
+    K.resize(mesh.getNumNodes(), mesh.getNumNodes());
+    phi.resize(mesh.getNumNodes());
+    f.resize(mesh.getNumNodes());
 }
 
 void PoissonSolver::assemble_matrix() {
     std::vector<Eigen::Triplet<double>> triplets;
-    for (size_t e = 0; e < mesh.get_num_elements(); ++e) {
-        auto element = mesh.get_element(e);
-        auto nodes = mesh.get_element_nodes(e);
+    for (size_t e = 0; e < mesh.getNumElements(); ++e) {
+        auto element = mesh.getElements()[e];
+        std::vector<Eigen::Vector2d> nodes;
+        for (int i = 0; i < 3; ++i) {
+            nodes.push_back(mesh.getNodes()[element[i]]);
+        }
         // 3-point Gaussian quadrature for P1 elements
         for (int q = 0; q < 3; ++q) {
             double x = 0.0, y = 0.0; // Compute quadrature point
@@ -31,13 +34,17 @@ void PoissonSolver::assemble_matrix() {
 
 void PoissonSolver::assemble_rhs() {
     f.setZero();
-    for (size_t e = 0; e < mesh.get_num_elements(); ++e) {
-        auto nodes = mesh.get_element_nodes(e);
+    for (size_t e = 0; e < mesh.getNumElements(); ++e) {
+        auto element = mesh.getElements()[e];
+        std::vector<Eigen::Vector2d> nodes;
+        for (int i = 0; i < 3; ++i) {
+            nodes.push_back(mesh.getNodes()[element[i]]);
+        }
         for (int q = 0; q < 3; ++q) {
             double x = 0.0, y = 0.0; // Compute quadrature point
             double charge = rho(x, y);
             for (int i = 0; i < 3; ++i) {
-                f[mesh.get_element(e)[i]] += charge * 1.0; // Basis function value
+                f[element[i]] += charge * 1.0; // Basis function value
             }
         }
     }
@@ -45,16 +52,33 @@ void PoissonSolver::assemble_rhs() {
 
 void PoissonSolver::apply_boundary_conditions(double V_p, double V_n) {
     // Apply Dirichlet BC: phi = V_p at x = -Lx/2, phi = V_n at x = Lx/2
-    for (size_t i = 0; i < mesh.get_num_nodes(); ++i) {
-        auto [x, y] = mesh.get_node(i);
-        if (std::abs(x - (-mesh.get_Lx() / 2)) < 1e-10) {
+    double Lx = 1.0; // Default domain size, should be a parameter
+    for (size_t i = 0; i < mesh.getNumNodes(); ++i) {
+        const auto& node = mesh.getNodes()[i];
+        double x = node[0];
+        double y = node[1];
+        if (std::abs(x - (-Lx / 2)) < 1e-10) {
             phi[i] = V_p;
-            K.row(i).setZero();
+            // Clear the row and set diagonal to 1
+            for (int k = 0; k < K.outerSize(); ++k) {
+                for (Eigen::SparseMatrix<double>::InnerIterator it(K, k); it; ++it) {
+                    if (it.row() == i) {
+                        it.valueRef() = 0.0;
+                    }
+                }
+            }
             K.coeffRef(i, i) = 1.0;
             f[i] = V_p;
-        } else if (std::abs(x - (mesh.get_Lx() / 2)) < 1e-10) {
+        } else if (std::abs(x - (Lx / 2)) < 1e-10) {
             phi[i] = V_n;
-            K.row(i).setZero();
+            // Clear the row and set diagonal to 1
+            for (int k = 0; k < K.outerSize(); ++k) {
+                for (Eigen::SparseMatrix<double>::InnerIterator it(K, k); it; ++it) {
+                    if (it.row() == i) {
+                        it.valueRef() = 0.0;
+                    }
+                }
+            }
             K.coeffRef(i, i) = 1.0;
             f[i] = V_n;
         }

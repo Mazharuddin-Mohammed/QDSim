@@ -4,6 +4,10 @@
 #include <Eigen/Dense>
 #include <string>
 
+#ifdef USE_MPI
+#include <mpi.h>
+#endif
+
 class Mesh {
 public:
     Mesh(double Lx, double Ly, int nx, int ny, int element_order = 1);
@@ -15,6 +19,9 @@ public:
     int getNumElements() const { return elements.size(); }
     int getElementOrder() const { return element_order; }
     void refine(const std::vector<bool>& refine_flags);
+#ifdef USE_MPI
+    void refine(const std::vector<bool>& refine_flags, MPI_Comm comm);
+#endif
     void save(const std::string& filename) const;
     static Mesh load(const std::string& filename);
 private:

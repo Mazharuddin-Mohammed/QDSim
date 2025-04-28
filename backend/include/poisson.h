@@ -13,7 +13,9 @@ public:
 private:
     Mesh& mesh;
     Eigen::SparseMatrix<double> K; // Stiffness matrix
+public:
     Eigen::VectorXd phi;           // Electrostatic potential
+private:
     Eigen::VectorXd f;             // Right-hand side
     double (*epsilon_r)(double, double); // Dielectric constant
     double (*rho)(double, double);       // Charge density
