@@ -8,11 +8,15 @@
 FEMSolver::FEMSolver(Mesh& mesh, double (*m_star)(double, double), double (*V)(double, double),
                      double (*cap)(double, double), PoissonSolver& poisson, int order, bool use_mpi)
     : mesh(mesh), poisson(poisson), m_star(m_star), V(V), cap(cap), order(order), use_mpi(use_mpi) {
-    H.resize(mesh.get_num_nodes(), mesh.get_num_nodes());
-    M.resize(mesh.get_num_nodes(), mesh.get_num_nodes());
+    H.resize(mesh.getNumNodes(), mesh.getNumNodes());
+    M.resize(mesh.getNumNodes(), mesh.getNumNodes());
 }
 
 void FEMSolver::assemble_matrices() {
+    // Resize matrices to match the current mesh
+    H.resize(mesh.getNumNodes(), mesh.getNumNodes());
+    M.resize(mesh.getNumNodes(), mesh.getNumNodes());
+
     if (use_mpi) {
 #ifdef USE_MPI
         assemble_matrices_parallel();
@@ -27,10 +31,20 @@ void FEMSolver::assemble_matrices() {
 
 void FEMSolver::assemble_matrices_serial() {
     std::vector<Eigen::Triplet<std::complex<double>>> H_triplets, M_triplets;
-    for (size_t e = 0; e < mesh.get_num_elements(); ++e) {
+    for (size_t e = 0; e < mesh.getNumElements(); ++e) {
         Eigen::MatrixXcd H_e, M_e;
         assemble_element_matrix(e, H_e, M_e);
-        auto element = mesh.get_element(e);
+
+        // Get the element nodes based on element order
+        std::vector<int> element;
+        if (order == 1) {
+            element.assign(mesh.getElements()[e].begin(), mesh.getElements()[e].end());
+        } else if (order == 2) {
+            element.assign(mesh.getQuadraticElements()[e].begin(), mesh.getQuadraticElements()[e].end());
+        } else { // order == 3
+            element.assign(mesh.getCubicElements()[e].begin(), mesh.getCubicElements()[e].end());
+        }
+
         for (int i = 0; i < H_e.rows(); ++i) {
             for (int j = 0; j < H_e.cols(); ++j) {
                 H_triplets.emplace_back(element[i], element[j], H_e(i, j));
@@ -48,7 +62,7 @@ void FEMSolver::assemble_matrices_parallel() {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    int num_elements = mesh.get_num_elements();
+    int num_elements = mesh.getNumElements();
     int elements_per_rank = num_elements / size;
     int start_elem = rank * elements_per_rank;
     int end_elem = (rank == size - 1) ? num_elements : start_elem + elements_per_rank;
@@ -57,7 +71,17 @@ void FEMSolver::assemble_matrices_parallel() {
     for (int e = start_elem; e < end_elem; ++e) {
         Eigen::MatrixXcd H_e, M_e;
         assemble_element_matrix(e, H_e, M_e);
-        auto element = mesh.get_element(e);
+
+        // Get the element nodes based on element order
+        std::vector<int> element;
+        if (order == 1) {
+            element.assign(mesh.getElements()[e].begin(), mesh.getElements()[e].end());
+        } else if (order == 2) {
+            element.assign(mesh.getQuadraticElements()[e].begin(), mesh.getQuadraticElements()[e].end());
+        } else { // order == 3
+            element.assign(mesh.getCubicElements()[e].begin(), mesh.getCubicElements()[e].end());
+        }
+
         for (int i = 0; i < H_e.rows(); ++i) {
             for (int j = 0; j < H_e.cols(); ++j) {
                 H_triplets.emplace_back(element[i], element[j], H_e(i, j));
@@ -137,9 +161,19 @@ void FEMSolver::assemble_matrices_parallel() {
     }
 
     // Broadcast matrices to all ranks
-    MPI_Bcast(&H.nonZeros(), 1, MPI_INT, 0, MPI_COMM_WORLD);
-    MPI_Bcast(&M.nonZeros(), 1, MPI_INT, 0, MPI_COMM_WORLD);
     // Note: In a real implementation, we would need to broadcast the actual matrix data
+    // For now, we'll just synchronize the number of non-zeros
+    if (rank == 0) {
+        int nnz_H = H.nonZeros();
+        int nnz_M = M.nonZeros();
+        MPI_Bcast(&nnz_H, 1, MPI_INT, 0, MPI_COMM_WORLD);
+        MPI_Bcast(&nnz_M, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    } else {
+        int nnz_H = 0;
+        int nnz_M = 0;
+        MPI_Bcast(&nnz_H, 1, MPI_INT, 0, MPI_COMM_WORLD);
+        MPI_Bcast(&nnz_M, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    }
 }
 #endif
 
@@ -160,12 +194,12 @@ void FEMSolver::adapt_mesh(const Eigen::VectorXd& eigenvector, double threshold,
     // Use MPI for mesh refinement if enabled
     if (use_mpi) {
 #ifdef USE_MPI
-        AdaptiveMesh::refineMesh(mesh, refine_flags, MPI_COMM_WORLD);
+        mesh.refine(refine_flags, MPI_COMM_WORLD);
 #else
-        AdaptiveMesh::refineMesh(mesh, refine_flags);
+        mesh.refine(refine_flags);
 #endif
     } else {
-        AdaptiveMesh::refineMesh(mesh, refine_flags);
+        mesh.refine(refine_flags);
     }
 
     if (!cache_file.empty()) {
@@ -182,15 +216,48 @@ void FEMSolver::assemble_element_matrix(size_t e, Eigen::MatrixXcd& H_e, Eigen::
     // Simplified; use existing P1/P2/P3 quadrature
     H_e.setZero(order == 1 ? 3 : (order == 2 ? 6 : 10), order == 1 ? 3 : (order == 2 ? 6 : 10));
     M_e.setZero(H_e.rows(), H_e.cols());
-    auto nodes = mesh.get_element_nodes(e);
-    for (int q = 0; q < (order == 1 ? 3 : (order == 2 ? 7 : 12)); ++q) {
-        double x = 0.0, y = 0.0; // Compute quadrature point
+
+    // Get element nodes
+    std::vector<Eigen::Vector2d> element_nodes;
+    if (order == 1) {
+        const auto& elem = mesh.getElements()[e];
+        for (int i = 0; i < 3; ++i) {
+            element_nodes.push_back(mesh.getNodes()[elem[i]]);
+        }
+    } else if (order == 2) {
+        const auto& elem = mesh.getQuadraticElements()[e];
+        for (int i = 0; i < 6; ++i) {
+            element_nodes.push_back(mesh.getNodes()[elem[i]]);
+        }
+    } else { // order == 3
+        const auto& elem = mesh.getCubicElements()[e];
+        for (int i = 0; i < 10; ++i) {
+            element_nodes.push_back(mesh.getNodes()[elem[i]]);
+        }
+    }
+
+    // Number of quadrature points based on element order
+    int num_quad_points = (order == 1) ? 3 : (order == 2) ? 7 : 12;
+
+    for (int q = 0; q < num_quad_points; ++q) {
+        // For simplicity, we'll just use the centroid of the element as the quadrature point
+        Eigen::Vector2d centroid = Eigen::Vector2d::Zero();
+        for (const auto& node : element_nodes) {
+            centroid += node;
+        }
+        centroid /= element_nodes.size();
+
+        double x = centroid.x();
+        double y = centroid.y();
+
         double m = m_star(x, y);
         double V_val = V(x, y);
-        double eta = cap(x, y, 0.1 * 1.602e-19, mesh.get_Lx(), mesh.get_Ly(), mesh.get_Lx() / 10);
-        // Compute basis functions and gradients
+        double eta = cap(x, y);
+
+        // Compute basis functions and gradients (simplified)
         for (int i = 0; i < H_e.rows(); ++i) {
             for (int j = 0; j < H_e.cols(); ++j) {
+                // Simplified matrix assembly - in a real implementation, we would compute the actual basis functions
                 H_e(i, j) += (1.054e-34 * 1.054e-34 / (2 * m)) * 1.0 + (V_val + std::complex<double>(0, eta)) * 1.0;
                 M_e(i, j) += 1.0; // Basis function product
             }

@@ -22,6 +22,6 @@ double Normalizer::computeAsymptoticAmplitude(const Eigen::VectorXd& psi) const 
 Eigen::VectorXd Normalizer::deltaNormalize(const Eigen::VectorXd& psi, double E) const {
     double rho = m_star / (M_PI * hbar * hbar); // DOS in J^-1·m^-2
     double A = computeAsymptoticAmplitude(psi);
-    double L = nodes.back()(0); // Domain size
+    double L = mesh.getNodes().back()(0); // Domain size
     return std::sqrt(rho) * psi / (A * L);
 }
