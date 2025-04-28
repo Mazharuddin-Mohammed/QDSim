@@ -20,6 +20,7 @@ class Config:
         self.N_D = 1e24                   # Donor doping (m^-3)
         self.V_r = 0.0                    # Reverse bias voltage (V)
         self.R = 10e-9                    # QD radius (m)
+        # MPI can be enabled/disabled at runtime
         self.use_mpi = True               # Enable/disable MPI
 
     def validate(self):
