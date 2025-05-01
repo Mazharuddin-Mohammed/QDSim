@@ -55,9 +55,11 @@ public:
      * @param cap Function that returns the capacitance at a given position
      * @param poisson The Poisson solver to use for electrostatic calculations
      * @param order The order of the finite elements (1 for P1, 2 for P2, 3 for P3)
-     * @param use_mpi Whether to use MPI for parallel computations
+     * @param use_mpi Whether to use MPI for parallel computations (only effective if compiled with USE_MPI)
      *
      * @throws std::invalid_argument If the input parameters are invalid
+     * @note If MPI support is not enabled at compile time (USE_MPI not defined),
+     *       the use_mpi parameter will be ignored and serial execution will be used.
      */
     FEMSolver(Mesh& mesh, double (*m_star)(double, double), double (*V)(double, double),
               double (*cap)(double, double), PoissonSolver& poisson, int order, bool use_mpi = true);
@@ -109,8 +111,15 @@ public:
      * @brief Checks if MPI is being used.
      *
      * @return True if MPI is being used, false otherwise
+     * @note This returns true only if both use_mpi is true AND the code was compiled with USE_MPI defined
      */
-    bool is_using_mpi() const { return use_mpi; }
+    bool is_using_mpi() const {
+#ifdef USE_MPI
+        return use_mpi;
+#else
+        return false;
+#endif
+    }
 
     /**
      * @brief Gets the finite element interpolator.
