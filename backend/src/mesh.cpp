@@ -1,16 +1,73 @@
+/**
+ * @file mesh.cpp
+ * @brief Implementation of the Mesh class for finite element discretization.
+ *
+ * This file contains the implementation of the Mesh class, which represents
+ * a 2D triangular mesh for finite element simulations. The implementation
+ * includes methods for mesh generation, refinement, and I/O.
+ *
+ * The mesh generation algorithm creates a structured triangular mesh with
+ * the specified number of elements in each direction. For higher-order elements,
+ * additional nodes are added on edges and (for cubic elements) inside triangles.
+ *
+ * Author: Dr. Mazharuddin Mohammed
+ */
+
 #include "mesh.h"
 #include "adaptive_mesh.h"
 #include <fstream>
+#include <map>
+#include <algorithm> // for std::sort
 
-Mesh::Mesh(double Lx, double Ly, int nx, int ny, int element_order) : element_order(element_order) {
+/**
+ * @brief Constructs a new Mesh object.
+ *
+ * This constructor initializes a new Mesh object with the specified dimensions,
+ * number of elements, and element order. It validates the element order and
+ * generates the triangular mesh.
+ *
+ * @param Lx Width of the domain in nanometers (nm)
+ * @param Ly Height of the domain in nanometers (nm)
+ * @param nx Number of elements in the x-direction
+ * @param ny Number of elements in the y-direction
+ * @param element_order Order of the elements (1 for P1, 2 for P2, 3 for P3)
+ *
+ * @throws std::invalid_argument If the element order is invalid
+ */
+Mesh::Mesh(double Lx, double Ly, int nx, int ny, int element_order)
+    : element_order(element_order), Lx(Lx), Ly(Ly), nx(nx), ny(ny) {
+    // Validate the element order
     if (element_order < 1 || element_order > 3) {
         throw std::invalid_argument("Element order must be 1 (linear), 2 (quadratic), or 3 (cubic)");
     }
+
+    // Generate the triangular mesh
     generateTriangularMesh(Lx, Ly, nx, ny);
 }
 
+/**
+ * @brief Generates a triangular mesh.
+ *
+ * This private method generates a structured triangular mesh with the specified
+ * dimensions and number of elements. It creates the nodes, elements, and
+ * higher-order elements (if requested).
+ *
+ * The mesh generation process involves:
+ * 1. Computing the element size
+ * 2. Generating the vertex nodes on a regular grid
+ * 3. Generating the triangular elements
+ * 4. Adding higher-order nodes for P2 and P3 elements
+ *
+ * @param Lx Width of the domain in nanometers (nm)
+ * @param Ly Height of the domain in nanometers (nm)
+ * @param nx Number of elements in the x-direction
+ * @param ny Number of elements in the y-direction
+ */
 void Mesh::generateTriangularMesh(double Lx, double Ly, int nx, int ny) {
+    // Compute the element size
     double dx = Lx / nx, dy = Ly / ny;
+
+    // Clear existing mesh data
     nodes.clear();
     elements.clear();
     quadratic_elements.clear();
@@ -99,11 +156,41 @@ void Mesh::generateTriangularMesh(double Lx, double Ly, int nx, int ny) {
     }
 }
 
+/**
+ * @brief Refines the mesh based on the given flags.
+ *
+ * This method refines the mesh by subdividing the elements marked for refinement.
+ * The refinement is performed in a way that maintains the mesh quality and
+ * ensures that the resulting mesh is conforming (no hanging nodes).
+ *
+ * The refinement is delegated to the AdaptiveMesh::refineMesh function,
+ * which implements the actual refinement algorithm.
+ *
+ * @param refine_flags A vector of boolean flags indicating which elements to refine
+ *
+ * @throws std::invalid_argument If the size of refine_flags does not match the number of elements
+ */
 void Mesh::refine(const std::vector<bool>& refine_flags) {
     AdaptiveMesh::refineMesh(*this, refine_flags);
 }
 
 #ifdef USE_MPI
+/**
+ * @brief Refines the mesh in parallel using MPI.
+ *
+ * This method refines the mesh in parallel using MPI. The refinement is performed
+ * in a way that maintains the mesh quality and ensures that the resulting mesh
+ * is conforming (no hanging nodes) across process boundaries.
+ *
+ * Currently, this is a placeholder implementation that simply calls the serial
+ * version. In a real implementation, we would use MPI to parallelize the refinement
+ * and synchronize the mesh across processes.
+ *
+ * @param refine_flags A vector of boolean flags indicating which elements to refine
+ * @param comm The MPI communicator
+ *
+ * @throws std::invalid_argument If the size of refine_flags does not match the number of elements
+ */
 void Mesh::refine(const std::vector<bool>& refine_flags, MPI_Comm comm) {
     // MPI version of mesh refinement
     // For now, just call the serial version
@@ -114,8 +201,29 @@ void Mesh::refine(const std::vector<bool>& refine_flags, MPI_Comm comm) {
 }
 #endif
 
+/**
+ * @brief Save the mesh to a file.
+ *
+ * This method saves the mesh to a file in a custom binary format.
+ * The file contains the mesh nodes, elements, and other metadata.
+ *
+ * The file format is:
+ * 1. Number of nodes, number of elements, element order
+ * 2. Node coordinates (x, y)
+ * 3. Element node indices (3 indices for P1, 6 for P2, 10 for P3)
+ *
+ * @param filename The name of the file to save the mesh to
+ *
+ * @throws std::runtime_error If the file cannot be opened or written to
+ */
 void Mesh::save(const std::string& filename) const {
+    // Open the output file
     std::ofstream out(filename);
+    if (!out) {
+        throw std::runtime_error("Failed to open file for writing: " + filename);
+    }
+
+    // Write the mesh metadata
     out << nodes.size() << " " << elements.size() << " " << element_order << "\n";
     for (const auto& node : nodes) {
         out << node(0) << " " << node(1) << "\n";
@@ -139,8 +247,31 @@ void Mesh::save(const std::string& filename) const {
     }
 }
 
+/**
+ * @brief Load a mesh from a file.
+ *
+ * This static method loads a mesh from a file in the custom binary format
+ * created by the save method.
+ *
+ * The file format is:
+ * 1. Number of nodes, number of elements, element order
+ * 2. Node coordinates (x, y)
+ * 3. Element node indices (3 indices for P1, 6 for P2, 10 for P3)
+ *
+ * @param filename The name of the file to load the mesh from
+ * @return A new Mesh object loaded from the file
+ *
+ * @throws std::runtime_error If the file cannot be opened or read from
+ * @throws std::invalid_argument If the file format is invalid
+ */
 Mesh Mesh::load(const std::string& filename) {
+    // Open the input file
     std::ifstream in(filename);
+    if (!in) {
+        throw std::runtime_error("Failed to open file for reading: " + filename);
+    }
+
+    // Read the mesh metadata
     size_t num_nodes, num_elements;
     int element_order;
     in >> num_nodes >> num_elements >> element_order;

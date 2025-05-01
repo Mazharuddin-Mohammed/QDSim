@@ -1,12 +1,66 @@
+/**
+ * @file adaptive_mesh.cpp
+ * @brief Implementation of the AdaptiveMesh class for adaptive mesh refinement.
+ *
+ * This file contains the implementation of the AdaptiveMesh class, which provides
+ * methods for adaptive mesh refinement based on solution features. The implementation
+ * includes algorithms for computing refinement flags, refining the mesh,
+ * ensuring mesh conformity, and improving mesh quality.
+ *
+ * The implementation supports both serial and parallel (MPI) execution,
+ * and can handle linear (P1), quadratic (P2), and cubic (P3) elements.
+ *
+ * Author: Dr. Mazharuddin Mohammed
+ */
+
 #include "adaptive_mesh.h"
 #include <map>
 #include <set>
 #include <cmath>
 
+#ifdef USE_MPI
+/**
+ * @brief Refines the mesh in parallel using MPI.
+ *
+ * This method refines the mesh by subdividing elements marked for refinement.
+ * It ensures mesh conformity by adding transition elements as needed.
+ * The refinement is performed in parallel using MPI.
+ *
+ * The refinement algorithm uses a red-green approach:
+ * - Red refinement: Subdivide an element into four similar elements
+ * - Green refinement: Add transition elements to ensure conformity
+ *
+ * @param mesh The mesh to refine
+ * @param refine_flags A vector of boolean flags indicating which elements to refine
+ * @param comm The MPI communicator
+ *
+ * @throws std::invalid_argument If the size of refine_flags does not match the number of elements
+ */
 void AdaptiveMesh::refineMesh(Mesh& mesh, const std::vector<bool>& refine_flags, MPI_Comm comm) {
+    // Get MPI rank and size
     int rank, size;
     MPI_Comm_rank(comm, &rank);
     MPI_Comm_size(comm, &size);
+#else
+/**
+ * @brief Refines the mesh.
+ *
+ * This method refines the mesh by subdividing elements marked for refinement.
+ * It ensures mesh conformity by adding transition elements as needed.
+ *
+ * The refinement algorithm uses a red-green approach:
+ * - Red refinement: Subdivide an element into four similar elements
+ * - Green refinement: Add transition elements to ensure conformity
+ *
+ * @param mesh The mesh to refine
+ * @param refine_flags A vector of boolean flags indicating which elements to refine
+ *
+ * @throws std::invalid_argument If the size of refine_flags does not match the number of elements
+ */
+void AdaptiveMesh::refineMesh(Mesh& mesh, const std::vector<bool>& refine_flags) {
+    // Serial version
+    int rank = 0, size = 1;
+#endif
 
     auto& nodes = const_cast<std::vector<Eigen::Vector2d>&>(mesh.getNodes());
     auto& elements = const_cast<std::vector<std::array<int, 3>>&>(mesh.getElements());
@@ -308,8 +362,27 @@ void AdaptiveMesh::refineMesh(Mesh& mesh, const std::vector<bool>& refine_flags,
     }
 }
 
+/**
+ * @brief Computes refinement flags based on solution gradients.
+ *
+ * This method computes refinement flags based on the gradient of the solution.
+ * Elements with large gradients are marked for refinement.
+ *
+ * The algorithm computes the gradient of the solution within each element
+ * using a least-squares fit, and compares the gradient magnitude to the
+ * specified threshold. Elements with gradient magnitude exceeding the
+ * threshold are marked for refinement.
+ *
+ * @param mesh The mesh
+ * @param psi The solution vector
+ * @param threshold The threshold for refinement (elements with gradient > threshold are refined)
+ * @return A vector of boolean flags indicating which elements to refine
+ */
 std::vector<bool> AdaptiveMesh::computeRefinementFlags(const Mesh& mesh, const Eigen::VectorXd& psi, double threshold) {
+    // Initialize refinement flags to false for all elements
     std::vector<bool> refine_flags(mesh.getNumElements(), false);
+
+    // Get mesh data
     const auto& nodes = mesh.getNodes();
     const auto& elements = mesh.getElements();
     int order = mesh.getElementOrder();
@@ -353,9 +426,25 @@ std::vector<bool> AdaptiveMesh::computeRefinementFlags(const Mesh& mesh, const E
     return refine_flags;
 }
 
+/**
+ * @brief Smooths the mesh to improve element quality.
+ *
+ * This method smooths the mesh by adjusting node positions to improve
+ * element quality. It uses a Laplacian smoothing algorithm, which moves
+ * each node towards the average position of its neighbors.
+ *
+ * The smoothing process preserves the boundary nodes to maintain the
+ * domain shape. It also ensures that the mesh quality is improved
+ * without introducing inverted elements.
+ *
+ * @param mesh The mesh to smooth
+ */
 void AdaptiveMesh::smoothMesh(Mesh& mesh) {
+    // Get mesh data
     auto& nodes = const_cast<std::vector<Eigen::Vector2d>&>(mesh.getNodes());
     const auto& elements = mesh.getElements();
+
+    // Build node-to-node connectivity
     std::vector<std::set<int>> neighbors(nodes.size());
 
     for (const auto& elem : elements) {
@@ -387,7 +476,24 @@ void AdaptiveMesh::smoothMesh(Mesh& mesh) {
     nodes = new_nodes;
 }
 
+/**
+ * @brief Computes the quality of a triangular element.
+ *
+ * This method computes the quality of a triangular element using the
+ * ratio of the inscribed circle radius to the circumscribed circle radius,
+ * normalized to give a value of 1 for an equilateral triangle.
+ *
+ * The quality measure is:
+ * Q = 4 * sqrt(3) * area / (l1^2 + l2^2 + l3^2)
+ *
+ * where area is the triangle area, and l1, l2, l3 are the edge lengths.
+ *
+ * @param mesh The mesh
+ * @param elem_idx The index of the element
+ * @return The quality of the element (0 to 1, where 1 is an equilateral triangle)
+ */
 double AdaptiveMesh::computeTriangleQuality(const Mesh& mesh, int elem_idx) {
+    // Get element vertices
     const auto& elem = mesh.getElements()[elem_idx];
     const auto& nodes = mesh.getNodes();
     Eigen::Vector2d a = nodes[elem[0]], b = nodes[elem[1]], c = nodes[elem[2]];
@@ -399,8 +505,23 @@ double AdaptiveMesh::computeTriangleQuality(const Mesh& mesh, int elem_idx) {
     return 4.0 * std::sqrt(3.0) * area / (l1 * l1 + l2 * l2 + l3 * l3);
 }
 
+/**
+ * @brief Checks if the mesh is conforming.
+ *
+ * This method checks if the mesh is conforming, i.e., if there are no
+ * hanging nodes. A conforming mesh is required for finite element analysis.
+ *
+ * The algorithm checks that each edge is shared by at most two elements.
+ * If an edge is shared by more than two elements, the mesh is non-conforming.
+ *
+ * @param mesh The mesh to check
+ * @return True if the mesh is conforming, false otherwise
+ */
 bool AdaptiveMesh::isMeshConforming(const Mesh& mesh) {
+    // Get mesh elements
     const auto& elements = mesh.getElements();
+
+    // Map each edge to the elements that contain it
     std::map<std::pair<int, int>, std::vector<int>> edge_to_elements;
 
     for (size_t i = 0; i < elements.size(); ++i) {
