@@ -28,6 +28,229 @@ from qdsim.visualization_fix import plot_wavefunction, plot_potential, plot_elec
 # Import 3D visualization functions
 from qdsim.visualization_3d import plot_3d_wavefunction, plot_3d_potential, create_interactive_3d_plot
 
+# Define additional visualization functions
+def plot_mesh_grid(mesh, use_nm=True, center_coords=True, title=None):
+    """
+    Plot the mesh grid in a separate window.
+
+    Args:
+        mesh: The mesh object
+        use_nm: If True, convert coordinates to nm
+        center_coords: If True, center the coordinates at (0,0)
+        title: Custom title for the plot
+    """
+    # Create a new figure
+    fig, ax = plt.subplots(figsize=(10, 8))
+
+    # Get mesh data
+    nodes = np.array(mesh.get_nodes())
+    elements = np.array(mesh.get_elements())
+
+    # Center coordinates if requested
+    if center_coords:
+        x_center = np.mean(nodes[:, 0])
+        y_center = np.mean(nodes[:, 1])
+        nodes_plot = nodes.copy()
+        nodes_plot[:, 0] -= x_center
+        nodes_plot[:, 1] -= y_center
+    else:
+        nodes_plot = nodes
+
+    # Convert to nm if requested
+    scale = 1e9 if use_nm else 1.0
+    nodes_plot = nodes_plot * scale
+
+    # Plot the mesh grid
+    for element in elements:
+        # Get the vertices of the element
+        vertices = nodes_plot[element]
+
+        # Add the first vertex again to close the triangle
+        vertices = np.vstack([vertices, vertices[0]])
+
+        # Plot the element
+        ax.plot(vertices[:, 0], vertices[:, 1], 'k-', linewidth=0.5, alpha=0.5)
+
+    # Set labels
+    ax.set_xlabel('x (nm)' if use_nm else 'x (m)')
+    ax.set_ylabel('y (nm)' if use_nm else 'y (m)')
+
+    # Set title
+    if title:
+        ax.set_title(title)
+    else:
+        ax.set_title('Mesh Grid')
+
+    # Set equal aspect ratio
+    ax.set_aspect('equal')
+
+    # Add grid
+    ax.grid(True, linestyle='--', alpha=0.3)
+
+    return fig, ax
+
+def plot_3d_surface(ax, mesh, values, use_nm=True, center_coords=True,
+                   title=None, convert_to_eV=False, azimuth=30, elevation=30):
+    """
+    Plot a 3D surface of values on the mesh.
+
+    Args:
+        ax: Matplotlib 3D axis
+        mesh: Mesh object
+        values: Values to plot
+        use_nm: If True, convert coordinates to nm
+        center_coords: If True, center the coordinates at (0,0)
+        title: Custom title for the plot
+        convert_to_eV: If True, convert values from J to eV
+        azimuth: Azimuth angle for 3D view in degrees
+        elevation: Elevation angle for 3D view in degrees
+    """
+    # Get mesh data
+    nodes = np.array(mesh.get_nodes())
+    elements = np.array(mesh.get_elements())
+
+    # Center coordinates if requested
+    if center_coords:
+        x_center = np.mean(nodes[:, 0])
+        y_center = np.mean(nodes[:, 1])
+        nodes_plot = nodes.copy()
+        nodes_plot[:, 0] -= x_center
+        nodes_plot[:, 1] -= y_center
+    else:
+        nodes_plot = nodes
+
+    # Convert to nm if requested
+    scale = 1e9 if use_nm else 1.0
+    nodes_plot = nodes_plot * scale
+
+    # Convert values to eV if requested
+    if convert_to_eV:
+        values_plot = values / 1.602e-19  # Convert J to eV
+        z_label = 'Potential (eV)'
+    else:
+        values_plot = values
+        z_label = 'Value'
+
+    # Create a triangulation for 3D plotting
+    from matplotlib.tri import Triangulation
+    triang = Triangulation(nodes_plot[:, 0], nodes_plot[:, 1], elements)
+
+    # Plot the surface
+    surf = ax.plot_trisurf(triang, values_plot, cmap='viridis', edgecolor='none', alpha=0.8)
+
+    # Add colorbar
+    plt.colorbar(surf, ax=ax, label=z_label)
+
+    # Set labels
+    ax.set_xlabel('x (nm)' if use_nm else 'x (m)')
+    ax.set_ylabel('y (nm)' if use_nm else 'y (m)')
+    ax.set_zlabel(z_label)
+
+    # Set title
+    if title:
+        ax.set_title(title)
+
+    # Set view angle
+    ax.view_init(elevation, azimuth)
+
+    return surf
+
+def create_interactive_3d_visualization(mesh, eigenvectors, eigenvalues, potential,
+                                       pn_potential, qd_potential, well_type):
+    """
+    Create an interactive 3D visualization with sliders for controlling the view.
+
+    Args:
+        mesh: Mesh object
+        eigenvectors: Eigenvectors to plot
+        eigenvalues: Eigenvalues corresponding to eigenvectors
+        potential: Combined potential values
+        pn_potential: P-N junction potential values
+        qd_potential: Quantum dot potential values
+        well_type: Type of quantum dot potential ('square' or 'gaussian')
+    """
+    from matplotlib.widgets import Slider, RadioButtons
+
+    # Create figure and axes
+    fig = plt.figure(figsize=(12, 10))
+    ax = fig.add_subplot(111, projection='3d')
+
+    # Initial values
+    azimuth = 30
+    elevation = 30
+    state_idx = 0
+    plot_type = 'combined_potential'
+
+    # Define the plot types and their corresponding data
+    plot_data = {
+        'combined_potential': (potential, True, f"Combined Potential ({well_type})"),
+        'pn_potential': (pn_potential, True, "P-N Junction Potential"),
+        'qd_potential': (qd_potential, True, f"Quantum Dot Potential ({well_type})"),
+        'ground_state': (np.abs(eigenvectors[:, 0])**2, False, f"Ground State (E = {np.real(eigenvalues[0])/1.602e-19:.6f} eV)"),
+        'first_excited': (np.abs(eigenvectors[:, 1])**2, False, f"First Excited State (E = {np.real(eigenvalues[1])/1.602e-19:.6f} eV)"),
+        'second_excited': (np.abs(eigenvectors[:, 2])**2, False, f"Second Excited State (E = {np.real(eigenvalues[2])/1.602e-19:.6f} eV)")
+    }
+
+    # Create plot
+    def update_plot():
+        ax.clear()
+
+        # Get the data for the current plot type
+        values, convert_to_eV, title = plot_data[plot_type]
+
+        # Plot the surface
+        plot_3d_surface(
+            ax=ax,
+            mesh=mesh,
+            values=values,
+            use_nm=True,
+            center_coords=True,
+            title=title,
+            convert_to_eV=convert_to_eV,
+            azimuth=azimuth,
+            elevation=elevation
+        )
+
+        fig.canvas.draw_idle()
+
+    # Initial plot
+    update_plot()
+
+    # Add sliders for azimuth and elevation
+    ax_azimuth = plt.axes([0.25, 0.05, 0.65, 0.03])
+    ax_elevation = plt.axes([0.25, 0.1, 0.65, 0.03])
+
+    s_azimuth = Slider(ax_azimuth, 'Azimuth', 0, 360, valinit=azimuth)
+    s_elevation = Slider(ax_elevation, 'Elevation', 0, 90, valinit=elevation)
+
+    def update_azimuth(val):
+        nonlocal azimuth
+        azimuth = val
+        update_plot()
+
+    def update_elevation(val):
+        nonlocal elevation
+        elevation = val
+        update_plot()
+
+    s_azimuth.on_changed(update_azimuth)
+    s_elevation.on_changed(update_elevation)
+
+    # Add radio buttons for plot type
+    ax_plot_type = plt.axes([0.025, 0.5, 0.15, 0.3])
+    radio_plot_type = RadioButtons(ax_plot_type, list(plot_data.keys()))
+
+    def update_plot_type(val):
+        nonlocal plot_type
+        plot_type = val
+        update_plot()
+
+    radio_plot_type.on_clicked(update_plot_type)
+
+    plt.tight_layout()
+    plt.subplots_adjust(left=0.2)
+    plt.show()
+
 def main():
     """
     Main function to run the simulation.
@@ -42,12 +265,18 @@ def main():
     # Create a configuration
     config = qdsim.Config()
 
+    # Physical constants
+    config.e_charge = 1.602e-19  # Elementary charge in C
+
     # Mesh configuration
-    config.Lx = 200e-9  # 200 nm
+    config.Lx = 200e-9  # 200 nm (100nm for P-region, 100nm for N-region)
     config.Ly = 200e-9  # 200 nm
     config.nx = 201     # More elements for better resolution (odd number for center alignment)
     config.ny = 101     # Odd number for center alignment
     config.element_order = 1  # Linear elements
+
+    # Set the junction position at the center (x=0)
+    config.junction_position = 0.0
 
     # Material configuration
     # AlGaAs properties
@@ -63,7 +292,7 @@ def main():
     config.qd_material = "Chromium"  # QD material (will use effective mass from this)
     config.R = 20e-9  # 20 nm - larger radius for better visualization
     config.V_0 = 0.8  # 0.8 eV - deeper well for more bound states
-    config.junction_position = 0.0  # Center the QD at the junction
+    # QD is positioned at the P-N interface (0,0)
 
     # Try both square and Gaussian wells
     well_types = ["square", "gaussian"]
@@ -92,6 +321,17 @@ def main():
         eigenvectors = results["eigenvectors"]
         eigenvalues = results["eigenvalues"]
         potential = results["potential"]
+
+        # Show the mesh grid in a separate window
+        print("\nShowing mesh grid...")
+        mesh_fig, mesh_ax = plot_mesh_grid(
+            mesh=mesh,
+            use_nm=True,
+            center_coords=True,
+            title=f"Mesh Grid ({mesh.get_num_nodes()} nodes, {mesh.get_num_elements()} elements)"
+        )
+        plt.savefig(f"chromium_qd_{well_type}_mesh.png", dpi=300)
+        plt.show()
 
         # Print eigenvalues (energies)
         print("\nEigenvalues (energies) in eV:")
@@ -148,8 +388,10 @@ def main():
             # Quantum dot potential
             r = np.sqrt((x - junction_x)**2 + y**2)  # Distance from junction center
             if well_type == "square":
+                # Square well with sharp boundaries
                 qd_potential[i] = -config.V_0 if r <= config.R else 0.0
             else:  # gaussian
+                # Gaussian well with smooth boundaries
                 qd_potential[i] = -config.V_0 * np.exp(-r**2 / (2 * config.R**2))
 
         # Create a figure for visualization
@@ -251,11 +493,111 @@ def main():
         # Show the figure
         plt.show()
 
-        # Skip 3D visualizations for now
-        print("\nSkipping 3D visualizations for now...")
+        # Create 3D visualizations
+        print("\nCreating 3D visualizations...")
 
-        # Skip interactive visualization for now
-        print("\nSkipping interactive visualization for now...")
+        # Create a figure for 3D visualization
+        fig_3d = plt.figure(figsize=(15, 10))
+
+        # Create a 2x2 grid for the plots
+        gs_3d = fig_3d.add_gridspec(2, 2)
+
+        # Plot combined potential in 3D
+        ax3d_1 = fig_3d.add_subplot(gs_3d[0, 0], projection='3d')
+        plot_3d_surface(
+            ax=ax3d_1,
+            mesh=mesh,
+            values=potential,
+            use_nm=True,
+            center_coords=True,
+            title=f"Combined Potential ({well_type})",
+            convert_to_eV=True,
+            azimuth=30,
+            elevation=30
+        )
+
+        # Plot ground state wavefunction in 3D
+        if len(eigenvectors) > 0:
+            energy_str = f"{np.real(eigenvalues[0])/1.602e-19:.6f} eV"
+            if np.iscomplex(eigenvalues[0]):
+                energy_str += f" + {np.imag(eigenvalues[0])/1.602e-19:.6f}i eV"
+
+            ax3d_2 = fig_3d.add_subplot(gs_3d[0, 1], projection='3d')
+            plot_3d_surface(
+                ax=ax3d_2,
+                mesh=mesh,
+                values=np.abs(eigenvectors[:, 0])**2,
+                use_nm=True,
+                center_coords=True,
+                title=f"Ground State (E = {energy_str})",
+                convert_to_eV=False,
+                azimuth=45,
+                elevation=30
+            )
+
+        # Plot first excited state wavefunction in 3D
+        if len(eigenvectors) > 1:
+            energy_str = f"{np.real(eigenvalues[1])/1.602e-19:.6f} eV"
+            if np.iscomplex(eigenvalues[1]):
+                energy_str += f" + {np.imag(eigenvalues[1])/1.602e-19:.6f}i eV"
+
+            ax3d_3 = fig_3d.add_subplot(gs_3d[1, 0], projection='3d')
+            plot_3d_surface(
+                ax=ax3d_3,
+                mesh=mesh,
+                values=np.abs(eigenvectors[:, 1])**2,
+                use_nm=True,
+                center_coords=True,
+                title=f"First Excited State (E = {energy_str})",
+                convert_to_eV=False,
+                azimuth=60,
+                elevation=30
+            )
+
+        # Plot second excited state wavefunction in 3D
+        if len(eigenvectors) > 2:
+            energy_str = f"{np.real(eigenvalues[2])/1.602e-19:.6f} eV"
+            if np.iscomplex(eigenvalues[2]):
+                energy_str += f" + {np.imag(eigenvalues[2])/1.602e-19:.6f}i eV"
+
+            ax3d_4 = fig_3d.add_subplot(gs_3d[1, 1], projection='3d')
+            plot_3d_surface(
+                ax=ax3d_4,
+                mesh=mesh,
+                values=np.abs(eigenvectors[:, 2])**2,
+                use_nm=True,
+                center_coords=True,
+                title=f"Second Excited State (E = {energy_str})",
+                convert_to_eV=False,
+                azimuth=30,
+                elevation=45
+            )
+
+        # Adjust layout
+        plt.tight_layout()
+
+        # Save the figure
+        plt.savefig(f"chromium_qd_{well_type}_well_3d.png", dpi=300)
+
+        # Show the figure
+        plt.show()
+
+        # Create interactive visualization
+        print("\nLaunching interactive visualization...")
+        try:
+            # Create interactive 3D visualization
+            create_interactive_3d_visualization(
+                mesh=mesh,
+                eigenvectors=eigenvectors,
+                eigenvalues=eigenvalues,
+                potential=potential,
+                pn_potential=pn_potential,
+                qd_potential=qd_potential,
+                well_type=well_type
+            )
+        except Exception as e:
+            print(f"Error launching interactive visualization: {e}")
+            print("Continuing with static plots...")
 
 if __name__ == "__main__":
     main()
