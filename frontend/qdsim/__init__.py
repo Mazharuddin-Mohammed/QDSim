@@ -33,3 +33,4 @@ except ImportError as e:
 from .config import Config
 from .simulator import Simulator
 from .visualization import plot_wavefunction, plot_electric_field, plot_potential, plot_energy_shift
+from .interactive_viz import show_interactive_visualization, InteractiveVisualizer
