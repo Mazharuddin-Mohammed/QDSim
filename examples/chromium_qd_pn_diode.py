@@ -25,6 +25,9 @@ import qdsim
 # Import the fixed visualization functions directly
 from qdsim.visualization_fix import plot_wavefunction, plot_potential, plot_electric_field
 
+# Import 3D visualization functions
+from qdsim.visualization_3d import plot_3d_wavefunction, plot_3d_potential, create_interactive_3d_plot
+
 def main():
     """
     Main function to run the simulation.
@@ -32,14 +35,18 @@ def main():
     print("Chromium Quantum Dot in AlGaAs P-N Diode Simulation")
     print("==================================================")
 
+    # Enable debug output
+    import logging
+    logging.basicConfig(level=logging.DEBUG)
+
     # Create a configuration
     config = qdsim.Config()
 
     # Mesh configuration
     config.Lx = 200e-9  # 200 nm
     config.Ly = 200e-9  # 200 nm
-    config.nx = 100     # More elements for better resolution
-    config.ny = 100
+    config.nx = 201     # More elements for better resolution (odd number for center alignment)
+    config.ny = 101     # Odd number for center alignment
     config.element_order = 1  # Linear elements
 
     # Material configuration
@@ -54,8 +61,9 @@ def main():
 
     # Quantum dot configuration
     config.qd_material = "Chromium"  # QD material (will use effective mass from this)
-    config.R = 10e-9  # 10 nm
-    config.V_0 = 0.5  # 0.5 eV - deep well
+    config.R = 20e-9  # 20 nm - larger radius for better visualization
+    config.V_0 = 0.8  # 0.8 eV - deeper well for more bound states
+    config.junction_position = 0.0  # Center the QD at the junction
 
     # Try both square and Gaussian wells
     well_types = ["square", "gaussian"]
@@ -106,17 +114,83 @@ def main():
                              if 0 <= np.real(energy) < quasi_bound_threshold]
         print(f"Found {len(quasi_bound_states)} quasi-bound states: {quasi_bound_states}")
 
-        # Create a figure for visualization
-        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+        # Create separate potentials for visualization
+        # Get node coordinates
+        nodes = np.array(mesh.get_nodes())
+        num_nodes = mesh.get_num_nodes()
 
-        # Plot potential
+        # Initialize potential arrays
+        pn_potential = np.zeros(num_nodes)
+        qd_potential = np.zeros(num_nodes)
+
+        # Calculate separate potentials
+        for i in range(num_nodes):
+            x = nodes[i, 0]
+            y = nodes[i, 1]
+
+            # P-N junction potential
+            junction_x = config.junction_position
+            depletion_width = config.depletion_width
+            V_p = 0.0
+            V_n = simulator.built_in_potential() + config.V_r
+
+            if x < junction_x - depletion_width/2:
+                # p-side
+                pn_potential[i] = V_p
+            elif x > junction_x + depletion_width/2:
+                # n-side
+                pn_potential[i] = V_n
+            else:
+                # Depletion region - quadratic profile
+                pos = 2 * (x - junction_x) / depletion_width
+                pn_potential[i] = V_p + (V_n - V_p) * (pos**2 + pos + 1) / 4
+
+            # Quantum dot potential
+            r = np.sqrt((x - junction_x)**2 + y**2)  # Distance from junction center
+            if well_type == "square":
+                qd_potential[i] = -config.V_0 if r <= config.R else 0.0
+            else:  # gaussian
+                qd_potential[i] = -config.V_0 * np.exp(-r**2 / (2 * config.R**2))
+
+        # Create a figure for visualization
+        fig = plt.figure(figsize=(15, 12))
+
+        # Create a 2x3 grid for the plots
+        gs = fig.add_gridspec(2, 3)
+
+        # Plot P-N junction potential
+        ax1 = fig.add_subplot(gs[0, 0])
         plot_potential(
-            ax=axes[0, 0],
+            ax=ax1,
+            mesh=mesh,
+            potential_values=pn_potential,
+            use_nm=True,
+            center_coords=True,
+            title=f"P-N Junction Potential",
+            convert_to_eV=True
+        )
+
+        # Plot quantum dot potential
+        ax2 = fig.add_subplot(gs[0, 1])
+        plot_potential(
+            ax=ax2,
+            mesh=mesh,
+            potential_values=qd_potential,
+            use_nm=True,
+            center_coords=True,
+            title=f"Quantum Dot Potential ({well_type})",
+            convert_to_eV=True
+        )
+
+        # Plot combined potential
+        ax3 = fig.add_subplot(gs[0, 2])
+        plot_potential(
+            ax=ax3,
             mesh=mesh,
             potential_values=potential,
             use_nm=True,
             center_coords=True,
-            title=f"Potential ({well_type} well)",
+            title=f"Combined Potential",
             convert_to_eV=True
         )
 
@@ -126,8 +200,9 @@ def main():
             if np.iscomplex(eigenvalues[0]):
                 energy_str += f" + {np.imag(eigenvalues[0])/1.602e-19:.6f}i eV"
 
+            ax4 = fig.add_subplot(gs[1, 0])
             plot_wavefunction(
-                ax=axes[0, 1],
+                ax=ax4,
                 mesh=mesh,
                 eigenvector=eigenvectors[:, 0],
                 use_nm=True,
@@ -141,8 +216,9 @@ def main():
             if np.iscomplex(eigenvalues[1]):
                 energy_str += f" + {np.imag(eigenvalues[1])/1.602e-19:.6f}i eV"
 
+            ax5 = fig.add_subplot(gs[1, 1])
             plot_wavefunction(
-                ax=axes[1, 0],
+                ax=ax5,
                 mesh=mesh,
                 eigenvector=eigenvectors[:, 1],
                 use_nm=True,
@@ -156,8 +232,9 @@ def main():
             if np.iscomplex(eigenvalues[2]):
                 energy_str += f" + {np.imag(eigenvalues[2])/1.602e-19:.6f}i eV"
 
+            ax6 = fig.add_subplot(gs[1, 2])
             plot_wavefunction(
-                ax=axes[1, 1],
+                ax=ax6,
                 mesh=mesh,
                 eigenvector=eigenvectors[:, 2],
                 use_nm=True,
@@ -169,26 +246,16 @@ def main():
         plt.tight_layout()
 
         # Save the figure
-        plt.savefig(f"chromium_qd_{well_type}_well.png", dpi=300)
+        plt.savefig(f"chromium_qd_{well_type}_well_2d.png", dpi=300)
 
         # Show the figure
         plt.show()
 
-        # Show interactive visualization
-        print("\nLaunching interactive visualization...")
-        try:
-            # For now, skip interactive visualization as it needs more fixes
-            print("Interactive visualization is disabled for now.")
-            # qdsim.show_interactive_visualization(
-            #     mesh=mesh,
-            #     eigenvectors=eigenvectors,
-            #     eigenvalues=eigenvalues,
-            #     potential=potential,
-            #     poisson_solver=None  # We don't have a poisson solver
-            # )
-        except Exception as e:
-            print(f"Error launching interactive visualization: {e}")
-            print("Continuing with static plots...")
+        # Skip 3D visualizations for now
+        print("\nSkipping 3D visualizations for now...")
+
+        # Skip interactive visualization for now
+        print("\nSkipping interactive visualization for now...")
 
 if __name__ == "__main__":
     main()
