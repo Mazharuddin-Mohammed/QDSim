@@ -33,5 +33,12 @@ PYBIND11_MODULE(fe_interpolator_module, m) {
             double value = self.interpolateWithGradient(x, y, field, grad_x, grad_y);
             return py::make_tuple(value, grad_x, grad_y);
         })
-        .def("find_element", &FEInterpolator::findElement);
+        .def("find_element", &FEInterpolator::findElement)
+        .def("compute_barycentric_coordinates", [](FEInterpolator& self, double x, double y, const std::vector<Eigen::Vector2d>& vertices) {
+            std::vector<double> lambda(3);
+            bool inside = self.computeBarycentricCoordinates(x, y, vertices, lambda);
+            return py::make_tuple(inside, lambda);
+        })
+        .def("evaluate_shape_functions", &FEInterpolator::evaluateShapeFunctions)
+        .def("evaluate_shape_function_gradients", &FEInterpolator::evaluateShapeFunctionGradients);
 }

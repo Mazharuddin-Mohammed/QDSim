@@ -77,7 +77,20 @@ PYBIND11_MODULE(qdsim_cpp, m) {
              "Interpolate a scalar field and its gradient at a point (x, y)")
         .def("find_element", &FEInterpolator::findElement,
              pybind11::arg("x"), pybind11::arg("y"),
-             "Find the element containing a point (x, y)");
+             "Find the element containing a point (x, y)")
+        .def("compute_barycentric_coordinates", [](FEInterpolator& self, double x, double y, const std::vector<Eigen::Vector2d>& vertices) {
+                std::vector<double> lambda(3);
+                bool inside = self.computeBarycentricCoordinates(x, y, vertices, lambda);
+                return std::make_tuple(inside, lambda);
+             },
+             pybind11::arg("x"), pybind11::arg("y"), pybind11::arg("vertices"),
+             "Compute the barycentric coordinates of a point in a triangle")
+        .def("evaluate_shape_functions", &FEInterpolator::evaluateShapeFunctions,
+             pybind11::arg("lambda"), pybind11::arg("shape_values"),
+             "Evaluate the shape functions at a point given by barycentric coordinates")
+        .def("evaluate_shape_function_gradients", &FEInterpolator::evaluateShapeFunctionGradients,
+             pybind11::arg("lambda"), pybind11::arg("vertices"), pybind11::arg("shape_gradients"),
+             "Evaluate the shape function gradients at a point given by barycentric coordinates");
 
     // MaterialDatabase class for material properties
     pybind11::class_<Materials::MaterialDatabase>(m, "MaterialDatabase")
