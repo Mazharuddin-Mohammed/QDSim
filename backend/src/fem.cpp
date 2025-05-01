@@ -427,57 +427,153 @@ void FEMSolver::assemble_element_matrix(size_t e, Eigen::MatrixXcd& H_e, Eigen::
         element_area = 0.5 * std::abs(v1(0) * v2(1) - v1(1) * v2(0));
     }
 
-    // Number of quadrature points based on element order
-    int num_quad_points = (order == 1) ? 3 : (order == 2) ? 7 : 12;
+    // Define quadrature points and weights based on element order
+    std::vector<Eigen::Vector2d> quad_points;
+    std::vector<double> quad_weights;
 
-    // Quadrature weights (simplified for now)
-    double quad_weight = element_area / num_quad_points;
+    // Set up quadrature points and weights for triangular elements
+    if (order == 1) {
+        // For P1 elements, use 3-point quadrature
+        quad_points.resize(3);
+        quad_weights.resize(3, element_area / 3.0);
 
-    for (int q = 0; q < num_quad_points; ++q) {
-        // For simplicity, we'll use the centroid of the element as the quadrature point
-        // In a real implementation, we would use proper quadrature points and weights
-        Eigen::Vector2d centroid = Eigen::Vector2d::Zero();
-        for (const auto& node : element_nodes) {
-            centroid += node;
+        // Barycentric coordinates of quadrature points
+        std::vector<std::vector<double>> bary_coords = {
+            {1.0/6.0, 1.0/6.0, 2.0/3.0},
+            {1.0/6.0, 2.0/3.0, 1.0/6.0},
+            {2.0/3.0, 1.0/6.0, 1.0/6.0}
+        };
+
+        // Convert barycentric to physical coordinates
+        for (int q = 0; q < 3; ++q) {
+            quad_points[q] = bary_coords[q][0] * element_nodes[0] +
+                             bary_coords[q][1] * element_nodes[1] +
+                             bary_coords[q][2] * element_nodes[2];
         }
-        centroid /= element_nodes.size();
+    } else if (order == 2) {
+        // For P2 elements, use 7-point quadrature
+        quad_points.resize(7);
+        quad_weights.resize(7);
 
-        double x = centroid.x();
-        double y = centroid.y();
+        // Barycentric coordinates and weights for 7-point quadrature
+        std::vector<std::vector<double>> bary_coords = {
+            {1.0/3.0, 1.0/3.0, 1.0/3.0},
+            {0.0597, 0.4701, 0.4701},
+            {0.4701, 0.0597, 0.4701},
+            {0.4701, 0.4701, 0.0597},
+            {0.7974, 0.1013, 0.1013},
+            {0.1013, 0.7974, 0.1013},
+            {0.1013, 0.1013, 0.7974}
+        };
+
+        std::vector<double> weights = {
+            0.225 * element_area,
+            0.1323941527 * element_area,
+            0.1323941527 * element_area,
+            0.1323941527 * element_area,
+            0.1259391805 * element_area,
+            0.1259391805 * element_area,
+            0.1259391805 * element_area
+        };
+
+        // Convert barycentric to physical coordinates
+        for (int q = 0; q < 7; ++q) {
+            quad_points[q] = bary_coords[q][0] * element_nodes[0] +
+                             bary_coords[q][1] * element_nodes[1] +
+                             bary_coords[q][2] * element_nodes[2];
+            quad_weights[q] = weights[q];
+        }
+    } else { // order == 3
+        // For P3 elements, use 12-point quadrature
+        quad_points.resize(12);
+        quad_weights.resize(12);
+
+        // Barycentric coordinates and weights for 12-point quadrature
+        // These are simplified for this implementation
+        std::vector<std::vector<double>> bary_coords = {
+            {0.2406, 0.2406, 0.5188},
+            {0.2406, 0.5188, 0.2406},
+            {0.5188, 0.2406, 0.2406},
+            {0.0630, 0.0630, 0.8740},
+            {0.0630, 0.8740, 0.0630},
+            {0.8740, 0.0630, 0.0630},
+            {0.0597, 0.4701, 0.4701},
+            {0.4701, 0.0597, 0.4701},
+            {0.4701, 0.4701, 0.0597},
+            {0.7974, 0.1013, 0.1013},
+            {0.1013, 0.7974, 0.1013},
+            {0.1013, 0.1013, 0.7974}
+        };
+
+        // Equal weights for simplicity
+        for (int q = 0; q < 12; ++q) {
+            quad_weights[q] = element_area / 12.0;
+        }
+
+        // Convert barycentric to physical coordinates
+        for (int q = 0; q < 12; ++q) {
+            quad_points[q] = bary_coords[q][0] * element_nodes[0] +
+                             bary_coords[q][1] * element_nodes[1] +
+                             bary_coords[q][2] * element_nodes[2];
+        }
+    }
+
+    // Loop over quadrature points
+    for (size_t q = 0; q < quad_points.size(); ++q) {
+        double x = quad_points[q].x();
+        double y = quad_points[q].y();
+        double quad_weight = quad_weights[q];
 
         // Get physical parameters at this point
         double m = m_star(x, y);
-        // Use the V function with the interpolator for proper FE interpolation
         double V_val = V(x, y);
         double eta = cap(x, y);
 
-        // Compute basis functions and gradients
-        // In a real implementation, we would compute the actual basis functions and their gradients
-        // For now, we'll use a simplified approach
+        // Compute barycentric coordinates for this quadrature point
+        std::vector<double> lambda(3);
+        std::vector<Eigen::Vector2d> vertices = {
+            element_nodes[0], element_nodes[1], element_nodes[2]
+        };
+        interpolator->computeBarycentricCoordinates(x, y, vertices, lambda);
+
+        // Evaluate shape functions and their gradients
+        std::vector<double> shape_values;
+        std::vector<Eigen::Vector2d> shape_gradients;
+
+        if (order == 1) {
+            shape_values.resize(3);
+            shape_gradients.resize(3);
+        } else if (order == 2) {
+            shape_values.resize(6);
+            shape_gradients.resize(6);
+        } else { // order == 3
+            shape_values.resize(10);
+            shape_gradients.resize(10);
+        }
+
+        // Evaluate shape functions and gradients
+        interpolator->evaluateShapeFunctions(lambda, shape_values);
+        interpolator->evaluateShapeFunctionGradients(lambda, vertices, shape_gradients);
 
         // Scale factor for kinetic energy term
         double kinetic_scale = (hbar * hbar) / (2.0 * m);
-
-        // Ensure kinetic_scale is not too large (can happen if m is very small)
-        if (kinetic_scale > 1e-10) {
-            kinetic_scale = std::min(kinetic_scale, 1e-10);
-        }
 
         // Assemble element matrices
         for (int i = 0; i < H_e.rows(); ++i) {
             for (int j = 0; j < H_e.cols(); ++j) {
                 // Kinetic energy term (T = -ħ²/2m * ∇²)
-                // In a real implementation, we would compute the gradient dot product
-                double grad_dot = (i == j) ? 1.0 : 0.1; // Simplified
+                // Compute gradient dot product
+                double grad_dot = shape_gradients[i].dot(shape_gradients[j]);
 
                 // Potential energy term (V + iη)
                 std::complex<double> potential(V_val, eta);
 
                 // Hamiltonian: H = T + V
-                H_e(i, j) += quad_weight * (kinetic_scale * grad_dot + potential * (i == j ? 1.0 : 0.0));
+                H_e(i, j) += quad_weight * (kinetic_scale * grad_dot +
+                                           potential * shape_values[i] * shape_values[j]);
 
                 // Mass matrix (overlap of basis functions)
-                M_e(i, j) += quad_weight * (i == j ? 1.0 : 0.0); // Simplified
+                M_e(i, j) += quad_weight * shape_values[i] * shape_values[j];
             }
         }
     }

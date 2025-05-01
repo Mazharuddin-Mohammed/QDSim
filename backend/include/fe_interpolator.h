@@ -104,13 +104,6 @@ public:
      */
     int findElement(double x, double y) const;
 
-private:
-    /** @brief Reference to the mesh used for interpolation */
-    const Mesh& mesh;
-
-    /** @brief Order of the finite elements (1 for P1, 2 for P2, 3 for P3) */
-    int element_order;
-
     /**
      * @brief Compute the barycentric coordinates of a point in a triangle.
      *
@@ -169,4 +162,11 @@ private:
     void evaluateShapeFunctionGradients(const std::vector<double>& lambda,
                                        const std::vector<Eigen::Vector2d>& vertices,
                                        std::vector<Eigen::Vector2d>& shape_gradients) const;
+
+private:
+    /** @brief Reference to the mesh used for interpolation */
+    const Mesh& mesh;
+
+    /** @brief Order of the finite elements (1 for P1, 2 for P2, 3 for P3) */
+    int element_order;
 };
