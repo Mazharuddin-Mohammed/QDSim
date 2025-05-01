@@ -25,8 +25,7 @@ import qdsim
 # Import the fixed visualization functions directly
 from qdsim.visualization_fix import plot_wavefunction, plot_potential, plot_electric_field
 
-# Import 3D visualization functions
-from qdsim.visualization_3d import plot_3d_wavefunction, plot_3d_potential, create_interactive_3d_plot
+# We won't use the interactive visualization as it requires Vulkan rendering
 
 # Define additional visualization functions
 def plot_mesh_grid(mesh, use_nm=True, center_coords=True, title=None):
@@ -155,101 +154,7 @@ def plot_3d_surface(ax, mesh, values, use_nm=True, center_coords=True,
 
     return surf
 
-def create_interactive_3d_visualization(mesh, eigenvectors, eigenvalues, potential,
-                                       pn_potential, qd_potential, well_type):
-    """
-    Create an interactive 3D visualization with sliders for controlling the view.
-
-    Args:
-        mesh: Mesh object
-        eigenvectors: Eigenvectors to plot
-        eigenvalues: Eigenvalues corresponding to eigenvectors
-        potential: Combined potential values
-        pn_potential: P-N junction potential values
-        qd_potential: Quantum dot potential values
-        well_type: Type of quantum dot potential ('square' or 'gaussian')
-    """
-    from matplotlib.widgets import Slider, RadioButtons
-
-    # Create figure and axes
-    fig = plt.figure(figsize=(12, 10))
-    ax = fig.add_subplot(111, projection='3d')
-
-    # Initial values
-    azimuth = 30
-    elevation = 30
-    state_idx = 0
-    plot_type = 'combined_potential'
-
-    # Define the plot types and their corresponding data
-    plot_data = {
-        'combined_potential': (potential, True, f"Combined Potential ({well_type})"),
-        'pn_potential': (pn_potential, True, "P-N Junction Potential"),
-        'qd_potential': (qd_potential, True, f"Quantum Dot Potential ({well_type})"),
-        'ground_state': (np.abs(eigenvectors[:, 0])**2, False, f"Ground State (E = {np.real(eigenvalues[0])/1.602e-19:.6f} eV)"),
-        'first_excited': (np.abs(eigenvectors[:, 1])**2, False, f"First Excited State (E = {np.real(eigenvalues[1])/1.602e-19:.6f} eV)"),
-        'second_excited': (np.abs(eigenvectors[:, 2])**2, False, f"Second Excited State (E = {np.real(eigenvalues[2])/1.602e-19:.6f} eV)")
-    }
-
-    # Create plot
-    def update_plot():
-        ax.clear()
-
-        # Get the data for the current plot type
-        values, convert_to_eV, title = plot_data[plot_type]
-
-        # Plot the surface
-        plot_3d_surface(
-            ax=ax,
-            mesh=mesh,
-            values=values,
-            use_nm=True,
-            center_coords=True,
-            title=title,
-            convert_to_eV=convert_to_eV,
-            azimuth=azimuth,
-            elevation=elevation
-        )
-
-        fig.canvas.draw_idle()
-
-    # Initial plot
-    update_plot()
-
-    # Add sliders for azimuth and elevation
-    ax_azimuth = plt.axes([0.25, 0.05, 0.65, 0.03])
-    ax_elevation = plt.axes([0.25, 0.1, 0.65, 0.03])
-
-    s_azimuth = Slider(ax_azimuth, 'Azimuth', 0, 360, valinit=azimuth)
-    s_elevation = Slider(ax_elevation, 'Elevation', 0, 90, valinit=elevation)
-
-    def update_azimuth(val):
-        nonlocal azimuth
-        azimuth = val
-        update_plot()
-
-    def update_elevation(val):
-        nonlocal elevation
-        elevation = val
-        update_plot()
-
-    s_azimuth.on_changed(update_azimuth)
-    s_elevation.on_changed(update_elevation)
-
-    # Add radio buttons for plot type
-    ax_plot_type = plt.axes([0.025, 0.5, 0.15, 0.3])
-    radio_plot_type = RadioButtons(ax_plot_type, list(plot_data.keys()))
-
-    def update_plot_type(val):
-        nonlocal plot_type
-        plot_type = val
-        update_plot()
-
-    radio_plot_type.on_clicked(update_plot_type)
-
-    plt.tight_layout()
-    plt.subplots_adjust(left=0.2)
-    plt.show()
+# Interactive 3D visualization removed as it requires Vulkan rendering
 
 def main():
     """
@@ -276,7 +181,14 @@ def main():
     config.element_order = 1  # Linear elements
 
     # Set the junction position at the center (x=0)
+    # This ensures equal P and N regions (100nm each)
     config.junction_position = 0.0
+
+    # Print mesh dimensions
+    print(f"Mesh dimensions: {config.Lx*1e9:.1f}nm x {config.Ly*1e9:.1f}nm")
+    print(f"P-region length: {config.Lx*1e9/2:.1f}nm")
+    print(f"N-region length: {config.Lx*1e9/2:.1f}nm")
+    print(f"Junction position: {config.junction_position*1e9:.1f}nm")
 
     # Material configuration
     # AlGaAs properties
@@ -288,11 +200,24 @@ def main():
     config.depletion_width = 100e-9  # 100 nm
     config.V_r = 1.0  # 1.0 V reverse bias
 
+    # Calculate built-in potential for display
+    kT = 0.026  # Room temperature in eV
+    ni = 1e6  # Intrinsic carrier concentration in cm^-3
+    built_in = kT * np.log((config.N_A * config.N_D) / (ni * ni))
+    print(f"Built-in potential: {built_in:.3f} V")
+    print(f"Reverse bias: {config.V_r:.1f} V")
+    print(f"Total junction potential: {built_in + config.V_r:.3f} V")
+
     # Quantum dot configuration
     config.qd_material = "Chromium"  # QD material (will use effective mass from this)
-    config.R = 20e-9  # 20 nm - larger radius for better visualization
-    config.V_0 = 0.8  # 0.8 eV - deeper well for more bound states
-    # QD is positioned at the P-N interface (0,0)
+    config.R = 20e-9  # 20 nm radius
+    config.V_0 = 0.8  # 0.8 eV well depth
+
+    # QD is positioned at the P-N interface (junction_position, 0)
+    # This is explicitly set to ensure proper positioning
+    print(f"Quantum dot position: ({config.junction_position*1e9:.1f}nm, 0.0nm)")
+    print(f"Quantum dot radius: {config.R*1e9:.1f}nm")
+    print(f"Quantum dot potential depth: {config.V_0:.2f} eV")
 
     # Try both square and Gaussian wells
     well_types = ["square", "gaussian"]
@@ -386,13 +311,23 @@ def main():
                 pn_potential[i] = V_p + (V_n - V_p) * (pos**2 + pos + 1) / 4
 
             # Quantum dot potential
+            # Calculate distance from junction center (junction_x, 0)
+            # This ensures the QD is properly positioned at the junction
             r = np.sqrt((x - junction_x)**2 + y**2)  # Distance from junction center
+
+            # Convert potential depth from eV to J
+            V_0_joules = config.V_0 * config.e_charge
+
             if well_type == "square":
                 # Square well with sharp boundaries
-                qd_potential[i] = -config.V_0 if r <= config.R else 0.0
+                qd_potential[i] = -V_0_joules if r <= config.R else 0.0
             else:  # gaussian
                 # Gaussian well with smooth boundaries
-                qd_potential[i] = -config.V_0 * np.exp(-r**2 / (2 * config.R**2))
+                qd_potential[i] = -V_0_joules * np.exp(-r**2 / (2 * config.R**2))
+
+            # Print some debug info for the first few nodes to verify QD positioning
+            if i < 5:
+                print(f"Node {i}: x={x*1e9:.1f}nm, y={y*1e9:.1f}nm, r={r*1e9:.1f}nm, QD potential={qd_potential[i]/config.e_charge:.3f}eV")
 
         # Create a figure for visualization
         fig = plt.figure(figsize=(15, 12))
@@ -493,7 +428,7 @@ def main():
         # Show the figure
         plt.show()
 
-        # Create 3D visualizations
+        # Create 3D visualizations with fixed viewing angles
         print("\nCreating 3D visualizations...")
 
         # Create a figure for 3D visualization
@@ -502,7 +437,7 @@ def main():
         # Create a 2x2 grid for the plots
         gs_3d = fig_3d.add_gridspec(2, 2)
 
-        # Plot combined potential in 3D
+        # Plot combined potential in 3D with 30° viewing angle
         ax3d_1 = fig_3d.add_subplot(gs_3d[0, 0], projection='3d')
         plot_3d_surface(
             ax=ax3d_1,
@@ -510,13 +445,13 @@ def main():
             values=potential,
             use_nm=True,
             center_coords=True,
-            title=f"Combined Potential ({well_type})",
+            title=f"Combined Potential ({well_type}) - 30° view",
             convert_to_eV=True,
             azimuth=30,
             elevation=30
         )
 
-        # Plot ground state wavefunction in 3D
+        # Plot ground state wavefunction in 3D with 45° viewing angle
         if len(eigenvectors) > 0:
             energy_str = f"{np.real(eigenvalues[0])/1.602e-19:.6f} eV"
             if np.iscomplex(eigenvalues[0]):
@@ -529,13 +464,13 @@ def main():
                 values=np.abs(eigenvectors[:, 0])**2,
                 use_nm=True,
                 center_coords=True,
-                title=f"Ground State (E = {energy_str})",
+                title=f"Ground State (E = {energy_str}) - 45° view",
                 convert_to_eV=False,
                 azimuth=45,
                 elevation=30
             )
 
-        # Plot first excited state wavefunction in 3D
+        # Plot first excited state wavefunction in 3D with 60° viewing angle
         if len(eigenvectors) > 1:
             energy_str = f"{np.real(eigenvalues[1])/1.602e-19:.6f} eV"
             if np.iscomplex(eigenvalues[1]):
@@ -548,13 +483,13 @@ def main():
                 values=np.abs(eigenvectors[:, 1])**2,
                 use_nm=True,
                 center_coords=True,
-                title=f"First Excited State (E = {energy_str})",
+                title=f"First Excited State (E = {energy_str}) - 60° view",
                 convert_to_eV=False,
                 azimuth=60,
                 elevation=30
             )
 
-        # Plot second excited state wavefunction in 3D
+        # Plot second excited state wavefunction in 3D with 45° elevation
         if len(eigenvectors) > 2:
             energy_str = f"{np.real(eigenvalues[2])/1.602e-19:.6f} eV"
             if np.iscomplex(eigenvalues[2]):
@@ -567,7 +502,7 @@ def main():
                 values=np.abs(eigenvectors[:, 2])**2,
                 use_nm=True,
                 center_coords=True,
-                title=f"Second Excited State (E = {energy_str})",
+                title=f"Second Excited State (E = {energy_str}) - 45° elevation",
                 convert_to_eV=False,
                 azimuth=30,
                 elevation=45
@@ -582,22 +517,7 @@ def main():
         # Show the figure
         plt.show()
 
-        # Create interactive visualization
-        print("\nLaunching interactive visualization...")
-        try:
-            # Create interactive 3D visualization
-            create_interactive_3d_visualization(
-                mesh=mesh,
-                eigenvectors=eigenvectors,
-                eigenvalues=eigenvalues,
-                potential=potential,
-                pn_potential=pn_potential,
-                qd_potential=qd_potential,
-                well_type=well_type
-            )
-        except Exception as e:
-            print(f"Error launching interactive visualization: {e}")
-            print("Continuing with static plots...")
+        print("\nNote: Interactive visualization is not available as it requires Vulkan rendering.")
 
 if __name__ == "__main__":
     main()

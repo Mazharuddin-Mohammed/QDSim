@@ -49,7 +49,7 @@ def patched_solve_poisson(self, V_p=None, V_n=None):
     try:
         # Get node coordinates
         nodes = np.array(self.mesh.get_nodes())
-        
+
         # Initialize the potential array with the correct size
         num_nodes = self.mesh.get_num_nodes()
         self.phi = np.zeros(num_nodes)
@@ -93,10 +93,16 @@ def patched_solve_poisson(self, V_p=None, V_n=None):
             V_0 = getattr(self.config, 'V_0', 0.0)
             R = getattr(self.config, 'R', 10.0)
 
+            # Use electron charge constant if not defined in config
+            e_charge = getattr(self.config, 'e_charge', 1.602e-19)
+
+            # Convert V_0 from eV to V (J/C)
+            V_0_joules = V_0 * e_charge
+
             if potential_type == "square":
-                qd_potential = -V_0 if r <= R else 0.0
+                qd_potential = -V_0_joules if r <= R else 0.0
             else:  # gaussian
-                qd_potential = -V_0 * np.exp(-r**2 / (2 * R**2))
+                qd_potential = -V_0_joules * np.exp(-r**2 / (2 * R**2))
 
             # Total potential (in V)
             self.phi[i] = pn_potential + qd_potential
@@ -135,7 +141,9 @@ def patched_solve(self, num_eigenvalues):
         self.eigenvalues[i] = real_part + imag_part * 1j
 
     # Convert from eV to Joules
-    self.eigenvalues *= self.config.e_charge
+    # Use electron charge constant if not defined in config
+    e_charge = getattr(self.config, 'e_charge', 1.602e-19)
+    self.eigenvalues *= e_charge
 
     # Create simplified eigenvectors
     # In a real implementation, these would be the solutions to the Schrödinger equation
@@ -198,8 +206,9 @@ def patched_run(self, num_eigenvalues=None, max_refinements=None, threshold=None
         if threshold is None:
             threshold = getattr(self.config, 'adaptive_threshold', 0.1)
 
-        if cache_dir is None:
-            cache_dir = getattr(self.config, 'cache_dir', None)
+        # Force disable caching
+        cache_dir = None
+        print("Caching disabled for this simulation")
 
         # Solve the Poisson equation
         self.solve_poisson()
