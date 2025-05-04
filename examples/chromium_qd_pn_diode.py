@@ -285,14 +285,21 @@ def main():
     # P-N junction configuration
     config.N_A = 1e24  # 1e18 cm^-3 = 1e24 m^-3
     config.N_D = 1e24  # 1e18 cm^-3 = 1e24 m^-3
-    config.depletion_width = 100e-9  # 100 nm
+    config.depletion_width = 50e-9  # 50 nm (as specified)
     config.V_r = 1.0  # 1.0 V reverse bias
+
+    # Print junction parameters
+    print(f"P-N junction position: x={config.junction_position*1e9:.1f}nm")
+    print(f"Depletion width: {config.depletion_width*1e9:.1f}nm")
 
     # Quantum dot configuration
     config.qd_material = "Chromium"  # QD material (will use effective mass from this)
-    config.R = 20e-9  # 20 nm - larger radius for better visualization
-    config.V_0 = 0.8  # 0.8 eV - deeper well for more bound states
-    # QD is positioned at the P-N interface (0,0)
+    config.R = 20e-9  # 20 nm radius
+    config.V_0 = 0.8  # 0.8 eV well depth
+    # QD is positioned at (0,0) which coincides with the P-N interface
+    print(f"Quantum dot position: x=0.0nm, y=0.0nm")
+    print(f"Quantum dot radius: {config.R*1e9:.1f}nm")
+    print(f"Quantum dot potential depth: {config.V_0:.2f}eV")
 
     # Try both square and Gaussian wells
     well_types = ["square", "gaussian"]
