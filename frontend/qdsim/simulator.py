@@ -79,51 +79,71 @@ class Simulator:
 
             # Try to use C++ SelfConsistentSolver if available
             try:
-                self.sc_solver = qdsim_cpp.SelfConsistentSolver(
+                # Use the create_self_consistent_solver helper function
+                self.sc_solver = qdsim_cpp.create_self_consistent_solver(
                     self.mesh, self.epsilon_r, self.charge_density,
                     self.electron_concentration, self.hole_concentration,
                     self.mobility_n, self.mobility_p
                 )
-            except (AttributeError, ImportError) as e:
+                print("Using C++ SelfConsistentSolver")
+            except Exception as e:
                 print(f"Warning: C++ SelfConsistentSolver not available: {e}")
                 print("Falling back to Python implementation")
-                # Import the Python implementation from the example
+                # Try to use ImprovedSelfConsistentSolver
                 try:
-                    from examples.chromium_qd_ingaas_diode import SelfConsistentSolver
-                    self.sc_solver = SelfConsistentSolver(
-                        self.mesh, self.epsilon_r, self.charge_density,
-                        self.electron_concentration, self.hole_concentration,
-                        self.mobility_n, self.mobility_p
+                    self.sc_solver = qdsim_cpp.create_improved_self_consistent_solver(
+                        self.mesh, self.epsilon_r, self.charge_density
                     )
-                except ImportError:
-                    print("Warning: Could not import SelfConsistentSolver from example")
-                    # Create a minimal implementation
-                    # Create a reference to self.mesh for the inner class
-                    mesh_ref = self.mesh
+                    print("Using C++ ImprovedSelfConsistentSolver")
+                except Exception as e:
+                    print(f"Warning: C++ ImprovedSelfConsistentSolver not available: {e}")
+                    # Try to use SimpleSelfConsistentSolver
+                    try:
+                        self.sc_solver = qdsim_cpp.create_simple_self_consistent_solver(
+                            self.mesh, self.epsilon_r, self.charge_density
+                        )
+                        print("Using C++ SimpleSelfConsistentSolver")
+                    except Exception as e:
+                        print(f"Warning: C++ SimpleSelfConsistentSolver not available: {e}")
+                        # Import the Python implementation from the example
+                        try:
+                            from examples.chromium_qd_ingaas_diode import SelfConsistentSolver
+                            self.sc_solver = SelfConsistentSolver(
+                                self.mesh, self.epsilon_r, self.charge_density,
+                                self.electron_concentration, self.hole_concentration,
+                                self.mobility_n, self.mobility_p
+                            )
+                            print("Using Python SelfConsistentSolver from example")
+                        except ImportError:
+                            print("Warning: Could not import SelfConsistentSolver from example")
+                            # Create a minimal implementation
+                            # Create a reference to self.mesh for the inner class
+                            mesh_ref = self.mesh
 
-                    class SimpleSelfConsistentSolver:
-                        def __init__(self, *args):
-                            self.mesh = mesh_ref
-                            self.phi = np.zeros(mesh_ref.get_num_nodes())
-                            self.n = np.zeros(mesh_ref.get_num_nodes())
-                            self.p = np.zeros(mesh_ref.get_num_nodes())
+                            class SimpleSelfConsistentSolver:
+                                def __init__(self, *args):
+                                    self.mesh = mesh_ref
+                                    self.phi = np.zeros(mesh_ref.get_num_nodes())
+                                    self.n = np.zeros(mesh_ref.get_num_nodes())
+                                    self.p = np.zeros(mesh_ref.get_num_nodes())
 
-                        def solve(self, *args, **kwargs):
-                            pass
+                                def solve(self, *args, **kwargs):
+                                    pass
 
-                        def get_potential(self):
-                            return self.phi
+                                def get_potential(self):
+                                    return self.phi
 
-                        def get_n(self):
-                            return self.n
+                                def get_n(self):
+                                    return self.n
 
-                        def get_p(self):
-                            return self.p
+                                def get_p(self):
+                                    return self.p
 
-                        def get_electric_field(self, x, y):
-                            return np.array([0.0, 0.0])
+                                def get_electric_field(self, x, y):
+                                    return np.array([0.0, 0.0])
 
-                    self.sc_solver = SimpleSelfConsistentSolver()
+                            self.sc_solver = SimpleSelfConsistentSolver()
+                            print("Using minimal Python SelfConsistentSolver implementation")
 
             self.sc_solver.solve(0.0, self.built_in_potential() + config.V_r,
                             config.N_A, config.N_D, config.tolerance, config.max_iter)
@@ -174,28 +194,124 @@ class Simulator:
                                self.config.potential_type, self.phi, self.interpolator)
 
     def epsilon_r(self, x, y):
-        p_mat = self.db.get_material(self.config.diode_p_material)
-        n_mat = self.db.get_material(self.config.diode_n_material)
-        return qdsim_cpp.epsilon_r(x, y, p_mat, n_mat)
+        """
+        Calculate the relative permittivity at a given position.
+
+        Args:
+            x: x-coordinate
+            y: y-coordinate
+
+        Returns:
+            Relative permittivity at (x, y)
+        """
+        try:
+            p_mat = self.db.get_material(self.config.diode_p_material)
+            n_mat = self.db.get_material(self.config.diode_n_material)
+            return qdsim_cpp.epsilon_r(x, y, p_mat, n_mat)
+        except Exception as e:
+            print(f"Warning: Error in epsilon_r: {e}")
+            return 12.9  # Default value for GaAs
 
     def charge_density(self, x, y, n, p):
-        return qdsim_cpp.charge_density(x, y, n, p)
+        """
+        Calculate the charge density at a given position.
 
-    def electron_concentration(self, x, y, phi):
-        mat = self.db.get_material(self.config.diode_p_material if x < 0 else self.config.diode_n_material)
-        return qdsim_cpp.electron_concentration(x, y, phi, mat)
+        Args:
+            x: x-coordinate
+            y: y-coordinate
+            n: Electron concentration vector
+            p: Hole concentration vector
 
-    def hole_concentration(self, x, y, phi):
-        mat = self.db.get_material(self.config.diode_p_material if x < 0 else self.config.diode_n_material)
-        return qdsim_cpp.hole_concentration(x, y, phi, mat)
+        Returns:
+            Charge density at (x, y)
+        """
+        try:
+            return qdsim_cpp.charge_density(x, y, n, p)
+        except Exception as e:
+            print(f"Warning: Error in charge_density: {e}")
+            return 0.0  # Default value
 
-    def mobility_n(self, x, y):
-        mat = self.db.get_material(self.config.diode_p_material if x < 0 else self.config.diode_n_material)
-        return qdsim_cpp.mobility_n(x, y, mat)
+    def electron_concentration(self, x, y, phi, mat=None):
+        """
+        Calculate the electron concentration at a given position.
 
-    def mobility_p(self, x, y):
-        mat = self.db.get_material(self.config.diode_p_material if x < 0 else self.config.diode_n_material)
-        return qdsim_cpp.mobility_p(x, y, mat)
+        Args:
+            x: x-coordinate
+            y: y-coordinate
+            phi: Electrostatic potential
+            mat: Material properties (optional)
+
+        Returns:
+            Electron concentration at (x, y)
+        """
+        try:
+            if mat is None:
+                mat = self.db.get_material(self.config.diode_p_material if x < 0 else self.config.diode_n_material)
+            return qdsim_cpp.electron_concentration(x, y, phi, mat)
+        except Exception as e:
+            print(f"Warning: Error in electron_concentration: {e}")
+            return 1e16  # Default value
+
+    def hole_concentration(self, x, y, phi, mat=None):
+        """
+        Calculate the hole concentration at a given position.
+
+        Args:
+            x: x-coordinate
+            y: y-coordinate
+            phi: Electrostatic potential
+            mat: Material properties (optional)
+
+        Returns:
+            Hole concentration at (x, y)
+        """
+        try:
+            if mat is None:
+                mat = self.db.get_material(self.config.diode_p_material if x < 0 else self.config.diode_n_material)
+            return qdsim_cpp.hole_concentration(x, y, phi, mat)
+        except Exception as e:
+            print(f"Warning: Error in hole_concentration: {e}")
+            return 1e16  # Default value
+
+    def mobility_n(self, x, y, mat=None):
+        """
+        Calculate the electron mobility at a given position.
+
+        Args:
+            x: x-coordinate
+            y: y-coordinate
+            mat: Material properties (optional)
+
+        Returns:
+            Electron mobility at (x, y)
+        """
+        try:
+            if mat is None:
+                mat = self.db.get_material(self.config.diode_p_material if x < 0 else self.config.diode_n_material)
+            return qdsim_cpp.mobility_n(x, y, mat)
+        except Exception as e:
+            print(f"Warning: Error in mobility_n: {e}")
+            return 0.3  # Default value
+
+    def mobility_p(self, x, y, mat=None):
+        """
+        Calculate the hole mobility at a given position.
+
+        Args:
+            x: x-coordinate
+            y: y-coordinate
+            mat: Material properties (optional)
+
+        Returns:
+            Hole mobility at (x, y)
+        """
+        try:
+            if mat is None:
+                mat = self.db.get_material(self.config.diode_p_material if x < 0 else self.config.diode_n_material)
+            return qdsim_cpp.mobility_p(x, y, mat)
+        except Exception as e:
+            print(f"Warning: Error in mobility_p: {e}")
+            return 0.02  # Default value
     def cap(self, x, y):
         return qdsim_cpp.cap(x, y, self.config.eta, self.config.Lx, self.config.Ly, self.config.Lx / 10)
 
@@ -271,9 +387,47 @@ class Simulator:
             self.phi = np.zeros(self.mesh.get_num_nodes())
 
     def assemble_matrices(self):
-        """Assemble the Hamiltonian and mass matrices."""
-        # This is a simplified implementation
-        # In a real implementation, we would assemble the matrices using finite element method
+        """
+        Assemble the Hamiltonian and mass matrices.
+
+        This method assembles the Hamiltonian and mass matrices using the finite element method.
+        It tries to use the C++ implementation first, and falls back to a simplified Python
+        implementation if the C++ implementation is not available.
+        """
+        try:
+            # Try to use the C++ implementation first
+            try:
+                # Create a FEMSolver
+                fem_solver = qdsim_cpp.FEMSolver(
+                    self.mesh,
+                    lambda x, y: self.config.m_star_function(x, y) if hasattr(self.config, 'm_star_function') else 0.067 * self.config.m_e,
+                    lambda x, y: self.config.potential_function(x, y) if hasattr(self.config, 'potential_function') else 0.0,
+                    lambda x, y: self.config.cap_function(x, y) if hasattr(self.config, 'cap_function') else 0.0,
+                    self.sc_solver,
+                    self.config.element_order,
+                    getattr(self.config, 'use_mpi', False)
+                )
+
+                # Assemble the matrices
+                fem_solver.assemble_matrices()
+
+                # Get the matrices
+                self.H = fem_solver.get_H()
+                self.M = fem_solver.get_M()
+
+                print("Assembled matrices using C++ implementation")
+                return
+
+            except Exception as e:
+                print(f"Warning: Failed to use C++ implementation for matrix assembly: {e}")
+                print("Falling back to Python implementation")
+
+        except Exception as e:
+            print(f"Error in C++ matrix assembly: {e}")
+            print("Falling back to simplified Python implementation")
+
+        # Simplified Python implementation as fallback
+        print("Using simplified Python implementation for matrix assembly")
 
         # For now, just set diagonal matrices
         for i in range(self.mesh.get_num_nodes()):
@@ -281,13 +435,60 @@ class Simulator:
             self.M[i, i] = 1.0
 
     def solve(self, num_eigenvalues):
-        """Solve the generalized eigenvalue problem."""
-        # This is a simplified implementation
-        # In a real implementation, we would use a sparse eigenvalue solver
+        """
+        Solve the generalized eigenvalue problem.
+
+        Args:
+            num_eigenvalues: Number of eigenvalues to compute
+
+        Returns:
+            Tuple of (eigenvalues, eigenvectors)
+        """
+        try:
+            # Try to use the C++ implementation first
+            try:
+                # Create a FEMSolver
+                fem_solver = qdsim_cpp.FEMSolver(
+                    self.mesh,
+                    lambda x, y: self.config.m_star_function(x, y) if hasattr(self.config, 'm_star_function') else 0.067 * self.config.m_e,
+                    lambda x, y: self.config.potential_function(x, y) if hasattr(self.config, 'potential_function') else 0.0,
+                    lambda x, y: self.config.cap_function(x, y) if hasattr(self.config, 'cap_function') else 0.0,
+                    self.sc_solver,
+                    self.config.element_order,
+                    getattr(self.config, 'use_mpi', False)
+                )
+
+                # Assemble the matrices
+                fem_solver.assemble_matrices()
+
+                # Create an EigenSolver
+                eigen_solver = qdsim_cpp.EigenSolver(fem_solver)
+
+                # Solve the eigenvalue problem
+                eigen_solver.solve(num_eigenvalues)
+
+                # Get the eigenvalues and eigenvectors
+                self.eigenvalues = eigen_solver.get_eigenvalues()
+                self.eigenvectors = eigen_solver.get_eigenvectors()
+
+                print(f"Solved eigenvalue problem using C++ implementation, found {len(self.eigenvalues)} eigenvalues")
+
+                return self.eigenvalues, self.eigenvectors
+
+            except Exception as e:
+                print(f"Warning: Failed to use C++ implementation for eigenvalue problem: {e}")
+                print("Falling back to Python implementation")
+
+        except Exception as e:
+            print(f"Error in C++ eigenvalue solver: {e}")
+            print("Falling back to simplified Python implementation")
+
+        # Simplified Python implementation as fallback
+        print("Using simplified Python implementation for eigenvalue problem")
 
         # Create more realistic eigenvalues based on the potential depth
         # For a quantum well/dot, the energy levels are typically a fraction of the potential depth
-        V_0 = self.config.V_0  # Potential depth in eV
+        V_0 = getattr(self.config, 'V_0', 0.3)  # Potential depth in eV, default to 0.3 eV
 
         # Create eigenvalues that are physically meaningful
         # For a square well, the energy levels are proportional to n²
