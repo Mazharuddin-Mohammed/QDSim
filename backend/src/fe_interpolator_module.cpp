@@ -12,7 +12,7 @@ PYBIND11_MODULE(fe_interpolator_module, m) {
     m.doc() = "Python bindings for the FEInterpolator class";
 
     // First expose the Mesh class since FEInterpolator depends on it
-    py::class_<Mesh>(m, "FEMesh")
+    py::class_<Mesh>(m, "Mesh")
         .def(py::init<double, double, int, int, int>())
         .def("get_nodes", &Mesh::getNodes)
         .def("get_elements", &Mesh::getElements)

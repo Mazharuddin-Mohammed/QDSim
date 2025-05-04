@@ -22,6 +22,10 @@
 #include "fem.h"
 #include "solver.h"
 #include "poisson.h"
+#include "self_consistent.h"
+#include "simple_self_consistent.h"
+#include "basic_solver.h"
+#include "improved_self_consistent.h"
 #include "materials.h"
 #include "physics.h"
 #include "fe_interpolator.h"
@@ -30,6 +34,108 @@
 #include <pybind11/stl.h>
 #include <pybind11/complex.h>
 #include <pybind11/functional.h>
+#include <iostream>
+#include <memory>
+
+// Global Python callback functions for SelfConsistentSolver
+// We use shared_ptr to ensure proper reference counting
+std::shared_ptr<pybind11::function> g_epsilon_r_py;
+std::shared_ptr<pybind11::function> g_rho_py;
+std::shared_ptr<pybind11::function> g_n_conc_py;
+std::shared_ptr<pybind11::function> g_p_conc_py;
+std::shared_ptr<pybind11::function> g_mu_n_py;
+std::shared_ptr<pybind11::function> g_mu_p_py;
+
+// C++ wrapper functions that call the Python callbacks
+double epsilon_r_wrapper(double x, double y) {
+    pybind11::gil_scoped_acquire gil;
+    try {
+        if (g_epsilon_r_py) {
+            return (*g_epsilon_r_py)(x, y).cast<double>();
+        } else {
+            std::cerr << "Error in epsilon_r callback: Python callback is null" << std::endl;
+            return 1.0; // Default value
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Error in epsilon_r callback: " << e.what() << std::endl;
+        return 1.0; // Default value
+    }
+}
+
+double rho_wrapper(double x, double y, const Eigen::VectorXd& n, const Eigen::VectorXd& p) {
+    pybind11::gil_scoped_acquire gil;
+    try {
+        if (g_rho_py) {
+            return (*g_rho_py)(x, y, n, p).cast<double>();
+        } else {
+            std::cerr << "Error in rho callback: Python callback is null" << std::endl;
+            return 0.0; // Default value
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Error in rho callback: " << e.what() << std::endl;
+        return 0.0; // Default value
+    }
+}
+
+double n_conc_wrapper(double x, double y, double phi, const Materials::Material& mat) {
+    pybind11::gil_scoped_acquire gil;
+    try {
+        if (g_n_conc_py) {
+            return (*g_n_conc_py)(x, y, phi, mat).cast<double>();
+        } else {
+            std::cerr << "Error in n_conc callback: Python callback is null" << std::endl;
+            return 1e10; // Default value
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Error in n_conc callback: " << e.what() << std::endl;
+        return 1e10; // Default value
+    }
+}
+
+double p_conc_wrapper(double x, double y, double phi, const Materials::Material& mat) {
+    pybind11::gil_scoped_acquire gil;
+    try {
+        if (g_p_conc_py) {
+            return (*g_p_conc_py)(x, y, phi, mat).cast<double>();
+        } else {
+            std::cerr << "Error in p_conc callback: Python callback is null" << std::endl;
+            return 1e10; // Default value
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Error in p_conc callback: " << e.what() << std::endl;
+        return 1e10; // Default value
+    }
+}
+
+double mu_n_wrapper(double x, double y, const Materials::Material& mat) {
+    pybind11::gil_scoped_acquire gil;
+    try {
+        if (g_mu_n_py) {
+            return (*g_mu_n_py)(x, y, mat).cast<double>();
+        } else {
+            std::cerr << "Error in mu_n callback: Python callback is null" << std::endl;
+            return 0.1; // Default value
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Error in mu_n callback: " << e.what() << std::endl;
+        return 0.1; // Default value
+    }
+}
+
+double mu_p_wrapper(double x, double y, const Materials::Material& mat) {
+    pybind11::gil_scoped_acquire gil;
+    try {
+        if (g_mu_p_py) {
+            return (*g_mu_p_py)(x, y, mat).cast<double>();
+        } else {
+            std::cerr << "Error in mu_p callback: Python callback is null" << std::endl;
+            return 0.01; // Default value
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Error in mu_p callback: " << e.what() << std::endl;
+        return 0.01; // Default value
+    }
+}
 
 /**
  * @brief Python module definition for the C++ library.
@@ -85,19 +191,21 @@ PYBIND11_MODULE(qdsim_cpp, m) {
              "Construct a new MaterialDatabase object with default materials")
         .def("get_material", [](const Materials::MaterialDatabase& db, const std::string& name) {
                 auto mat = db.get_material(name);
-                return std::make_tuple(mat.m_e, mat.m_h, mat.E_g, mat.Delta_E_c, mat.epsilon_r);
+                return std::make_tuple(mat.m_e, mat.m_h, mat.E_g, mat.Delta_E_c, mat.epsilon_r,
+                                         mat.mu_n, mat.mu_p, mat.N_c, mat.N_v);
              },
              pybind11::arg("name"),
-             "Get the properties of a material by name, returns a tuple of (m_e, m_h, E_g, Delta_E_c, epsilon_r)");
+             "Get the properties of a material by name, returns a tuple of (m_e, m_h, E_g, Delta_E_c, epsilon_r, mat.mu_n, mat.mu_p, mat.N_c, mat.N_v)");
 
     // PoissonSolver class for electrostatic calculations
     pybind11::class_<PoissonSolver>(m, "PoissonSolver")
-        .def(pybind11::init<Mesh&, double(*)(double, double), double(*)(double, double)>(),
-             pybind11::arg("mesh"), pybind11::arg("rho"), pybind11::arg("epsilon_r"),
-             "Construct a new PoissonSolver object with the specified mesh, charge density function, and permittivity function")
+        .def(pybind11::init<Mesh&, double(*)(double, double),
+                           double(*)(double, double, const Eigen::VectorXd&, const Eigen::VectorXd&)>(),
+             pybind11::arg("mesh"), pybind11::arg("epsilon_r"), pybind11::arg("rho"),
+             "Construct a new PoissonSolver object with the specified mesh, permittivity function, and charge density function")
         .def("solve", &PoissonSolver::solve,
-             pybind11::arg("V_p"), pybind11::arg("V_n"),
-             "Solve the Poisson equation with the specified boundary potentials")
+             pybind11::arg("V_p"), pybind11::arg("V_n"), pybind11::arg("n"), pybind11::arg("p"),
+             "Solve the Poisson equation with the specified boundary potentials and carrier concentrations")
         .def("get_potential", [](const PoissonSolver& solver) { return solver.phi; },
              "Get the computed electrostatic potential")
         .def("get_electric_field", [](const PoissonSolver& solver, double x, double y) {
@@ -107,16 +215,41 @@ PYBIND11_MODULE(qdsim_cpp, m) {
              pybind11::arg("x"), pybind11::arg("y"),
              "Get the electric field at a point (x, y)");
 
+     // SelfConsistentSolver class for self-consistent Poisson-drift-diffusion simulations
+     pybind11::class_<SelfConsistentSolver>(m, "SelfConsistentSolver")
+             .def(pybind11::init<Mesh&, double(*)(double, double),
+                                double(*)(double, double, const Eigen::VectorXd&, const Eigen::VectorXd&),
+                                double(*)(double, double, double, const Materials::Material&),
+                                double(*)(double, double, double, const Materials::Material&),
+                                double(*)(double, double, const Materials::Material&),
+                                double(*)(double, double, const Materials::Material&)>(),
+                  pybind11::arg("mesh"), pybind11::arg("epsilon_r"), pybind11::arg("rho"),
+                  pybind11::arg("n_conc"), pybind11::arg("p_conc"), pybind11::arg("mu_n"), pybind11::arg("mu_p"),
+                  "Construct a new SelfConsistentSolver object with the specified mesh and callback functions")
+             .def("solve", &SelfConsistentSolver::solve,
+                  pybind11::arg("V_p"), pybind11::arg("V_n"), pybind11::arg("N_A"), pybind11::arg("N_D"),
+                  pybind11::arg("tolerance") = 1e-6, pybind11::arg("max_iter") = 100,
+                  "Solve the self-consistent Poisson-drift-diffusion equations")
+             .def("get_potential", &SelfConsistentSolver::get_potential,
+                  "Get the computed electrostatic potential")
+             .def("get_n", &SelfConsistentSolver::get_n,
+                  "Get the computed electron concentration")
+             .def("get_p", &SelfConsistentSolver::get_p,
+                  "Get the computed hole concentration")
+             .def("get_electric_field", &SelfConsistentSolver::get_electric_field,
+                  pybind11::arg("x"), pybind11::arg("y"),
+                  "Get the electric field at a point (x, y)");
+
     // FEMSolver class for quantum simulations
     pybind11::class_<FEMSolver>(m, "FEMSolver")
-        .def(pybind11::init<Mesh&, double(*)(double, double), double(*)(double, double), double(*)(double, double), PoissonSolver&, int, bool>(),
+        .def(pybind11::init<Mesh&, double(*)(double, double), double(*)(double, double), double(*)(double, double), SelfConsistentSolver&, int, bool>(),
              pybind11::arg("mesh"), pybind11::arg("m_star"), pybind11::arg("V"), pybind11::arg("cap"),
-             pybind11::arg("poisson"), pybind11::arg("order"), pybind11::arg("use_mpi") = true,
-             "Construct a new FEMSolver object with the specified mesh, effective mass function, potential function, capacitance function, Poisson solver, element order, and MPI flag")
+             pybind11::arg("sc_solver"), pybind11::arg("order"), pybind11::arg("use_mpi") = false,
+             "Construct a new FEMSolver object with the specified mesh, effective mass function, potential function, capacitance function, Self-Consistent solver, element order, and MPI flag")
         .def("assemble_matrices", &FEMSolver::assemble_matrices,
              "Assemble the Hamiltonian and mass matrices")
         .def("adapt_mesh", &FEMSolver::adapt_mesh,
-             pybind11::arg("psi"), pybind11::arg("threshold"),
+             pybind11::arg("psi"), pybind11::arg("threshold"), pybind11::arg("output_file") = "",
              "Adapt the mesh based on the solution gradient")
         .def("is_using_mpi", &FEMSolver::is_using_mpi,
              "Check if the solver is using MPI")
@@ -154,11 +287,133 @@ PYBIND11_MODULE(qdsim_cpp, m) {
           pybind11::arg("x"), pybind11::arg("y"), pybind11::arg("p_mat"), pybind11::arg("n_mat"),
           "Compute the relative permittivity at a point (x, y) based on the p-type and n-type materials");
 
+    /*
     m.def("charge_density", &Physics::charge_density,
           pybind11::arg("x"), pybind11::arg("y"), pybind11::arg("N_A"), pybind11::arg("N_D"), pybind11::arg("W_d"),
           "Compute the charge density at a point (x, y) based on the doping concentrations and depletion width");
+    */
 
-    m.def("cap", &Physics::cap,
+    m.def("charge_density", &Physics::charge_density,
+               pybind11::arg("x"), pybind11::arg("y"), pybind11::arg("n"), pybind11::arg("p"),
+               pybind11::arg("n_interpolator") = nullptr, pybind11::arg("p_interpolator") = nullptr,
+               "Compute the charge density at a point (x, y) based on the carrier concentrations");
+
+     m.def("cap", &Physics::cap,
           pybind11::arg("x"), pybind11::arg("y"), pybind11::arg("eta"), pybind11::arg("Lx"), pybind11::arg("Ly"), pybind11::arg("d"),
           "Compute the capacitance at a point (x, y) based on the gate geometry and dielectric properties");
+
+     m.def("electron_concentration", &Physics::electron_concentration,
+          pybind11::arg("x"), pybind11::arg("y"), pybind11::arg("phi"), pybind11::arg("mat"),
+          "Compute the electron concentration at a point (x, y) based on the electrostatic potential and material properties");
+
+     m.def("hole_concentration", &Physics::hole_concentration,
+          pybind11::arg("x"), pybind11::arg("y"), pybind11::arg("phi"), pybind11::arg("mat"),
+          "Compute the hole concentration at a point (x, y) based on the electrostatic potential and material properties");
+
+     m.def("mobility_n", &Physics::mobility_n,
+          pybind11::arg("x"), pybind11::arg("y"), pybind11::arg("mat"),
+          "Compute the electron mobility at a point (x, y) based on the material properties");
+
+     m.def("mobility_p", &Physics::mobility_p,
+          pybind11::arg("x"), pybind11::arg("y"), pybind11::arg("mat"),
+          "Compute the hole mobility at a point (x, y) based on the material properties");
+
+     // SimpleSelfConsistentSolver class for simplified self-consistent Poisson-drift-diffusion simulations
+     pybind11::class_<SimpleSelfConsistentSolver>(m, "SimpleSelfConsistentSolver")
+             .def(pybind11::init<Mesh&, std::function<double(double, double)>,
+                                std::function<double(double, double, const Eigen::VectorXd&, const Eigen::VectorXd&)>>(),
+                  pybind11::arg("mesh"), pybind11::arg("epsilon_r"), pybind11::arg("rho"),
+                  "Construct a new SimpleSelfConsistentSolver object with the specified mesh and callback functions")
+             .def("solve", &SimpleSelfConsistentSolver::solve,
+                  pybind11::arg("V_p"), pybind11::arg("V_n"), pybind11::arg("N_A"), pybind11::arg("N_D"),
+                  pybind11::arg("tolerance") = 1e-6, pybind11::arg("max_iter") = 100,
+                  "Solve the self-consistent Poisson-drift-diffusion equations")
+             .def("get_potential", &SimpleSelfConsistentSolver::get_potential,
+                  "Get the computed electrostatic potential")
+             .def("get_n", &SimpleSelfConsistentSolver::get_n,
+                  "Get the computed electron concentration")
+             .def("get_p", &SimpleSelfConsistentSolver::get_p,
+                  "Get the computed hole concentration");
+
+     // BasicSolver class for demonstration purposes
+     pybind11::class_<BasicSolver>(m, "BasicSolver")
+             .def(pybind11::init<Mesh&>(),
+                  pybind11::arg("mesh"),
+                  "Construct a new BasicSolver object with the specified mesh")
+             .def("solve", &BasicSolver::solve,
+                  pybind11::arg("V_p"), pybind11::arg("V_n"), pybind11::arg("N_A"), pybind11::arg("N_D"),
+                  "Set up simple fields without doing any actual solving")
+             .def("get_potential", &BasicSolver::get_potential,
+                  "Get the electrostatic potential")
+             .def("get_n", &BasicSolver::get_n,
+                  "Get the electron concentration")
+             .def("get_p", &BasicSolver::get_p,
+                  "Get the hole concentration");
+
+     // ImprovedSelfConsistentSolver class for self-consistent Poisson-drift-diffusion simulations
+     pybind11::class_<ImprovedSelfConsistentSolver>(m, "ImprovedSelfConsistentSolver")
+             .def(pybind11::init<Mesh&, std::function<double(double, double)>,
+                                std::function<double(double, double, const Eigen::VectorXd&, const Eigen::VectorXd&)>>(),
+                  pybind11::arg("mesh"), pybind11::arg("epsilon_r"), pybind11::arg("rho"),
+                  "Construct a new ImprovedSelfConsistentSolver object with the specified mesh and callback functions")
+             .def("solve", &ImprovedSelfConsistentSolver::solve,
+                  pybind11::arg("V_p"), pybind11::arg("V_n"), pybind11::arg("N_A"), pybind11::arg("N_D"),
+                  pybind11::arg("tolerance") = 1e-6, pybind11::arg("max_iter") = 100,
+                  "Solve the self-consistent Poisson-drift-diffusion equations")
+             .def("get_potential", &ImprovedSelfConsistentSolver::get_potential,
+                  "Get the computed electrostatic potential")
+             .def("get_n", &ImprovedSelfConsistentSolver::get_n,
+                  "Get the computed electron concentration")
+             .def("get_p", &ImprovedSelfConsistentSolver::get_p,
+                  "Get the computed hole concentration");
+
+     // Helper functions to create callbacks for SelfConsistentSolver
+     m.def("create_self_consistent_solver", [](Mesh& mesh, pybind11::function epsilon_r_py, pybind11::function rho_py,
+                                             pybind11::function n_conc_py, pybind11::function p_conc_py,
+                                             pybind11::function mu_n_py, pybind11::function mu_p_py) {
+         // Store the Python callbacks in global variables using shared_ptr
+         g_epsilon_r_py = std::make_shared<pybind11::function>(epsilon_r_py);
+         g_rho_py = std::make_shared<pybind11::function>(rho_py);
+         g_n_conc_py = std::make_shared<pybind11::function>(n_conc_py);
+         g_p_conc_py = std::make_shared<pybind11::function>(p_conc_py);
+         g_mu_n_py = std::make_shared<pybind11::function>(mu_n_py);
+         g_mu_p_py = std::make_shared<pybind11::function>(mu_p_py);
+
+         // Create and return the SelfConsistentSolver with the wrapper functions
+         return new SelfConsistentSolver(mesh, epsilon_r_wrapper, rho_wrapper, n_conc_wrapper, p_conc_wrapper, mu_n_wrapper, mu_p_wrapper);
+     }, pybind11::arg("mesh"), pybind11::arg("epsilon_r"), pybind11::arg("rho"),
+        pybind11::arg("n_conc"), pybind11::arg("p_conc"), pybind11::arg("mu_n"), pybind11::arg("mu_p"),
+        "Create a new SelfConsistentSolver object with the specified mesh and Python callback functions");
+
+     // Helper function to create a SimpleSelfConsistentSolver
+     m.def("create_simple_self_consistent_solver", [](Mesh& mesh, pybind11::function epsilon_r_py, pybind11::function rho_py) {
+         // Store the Python callbacks in global variables using shared_ptr
+         g_epsilon_r_py = std::make_shared<pybind11::function>(epsilon_r_py);
+         g_rho_py = std::make_shared<pybind11::function>(rho_py);
+
+         // Create and return the SimpleSelfConsistentSolver with the wrapper functions
+         return new SimpleSelfConsistentSolver(mesh, epsilon_r_wrapper, rho_wrapper);
+     }, pybind11::arg("mesh"), pybind11::arg("epsilon_r"), pybind11::arg("rho"),
+        "Create a new SimpleSelfConsistentSolver object with the specified mesh and Python callback functions");
+
+     // Helper function to create an ImprovedSelfConsistentSolver
+     m.def("create_improved_self_consistent_solver", [](Mesh& mesh, pybind11::function epsilon_r_py, pybind11::function rho_py) {
+         // Store the Python callbacks in global variables using shared_ptr
+         g_epsilon_r_py = std::make_shared<pybind11::function>(epsilon_r_py);
+         g_rho_py = std::make_shared<pybind11::function>(rho_py);
+
+         // Create and return the ImprovedSelfConsistentSolver with the wrapper functions
+         return new ImprovedSelfConsistentSolver(mesh, epsilon_r_wrapper, rho_wrapper);
+     }, pybind11::arg("mesh"), pybind11::arg("epsilon_r"), pybind11::arg("rho"),
+        "Create a new ImprovedSelfConsistentSolver object with the specified mesh and Python callback functions");
+
+     // Helper function to clear the global variables
+     m.def("clear_callbacks", []() {
+         g_epsilon_r_py.reset();
+         g_rho_py.reset();
+         g_n_conc_py.reset();
+         g_p_conc_py.reset();
+         g_mu_n_py.reset();
+         g_mu_p_py.reset();
+     }, "Clear the global Python callbacks to avoid memory leaks");
 }
