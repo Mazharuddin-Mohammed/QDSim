@@ -20,6 +20,52 @@ if(USE_MPI)
     include_directories(${MPI_INCLUDE_PATH})
 endif()
 
+# Add CUDA support (optional)
+option(USE_CUDA "Enable CUDA support" OFF)
+if(USE_CUDA)
+    find_package(CUDA QUIET)
+    if(CUDA_FOUND)
+        enable_language(CUDA)
+        add_definitions(-DUSE_CUDA)
+        include_directories(${CUDA_INCLUDE_DIRS})
+        set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -std=c++14")
+        message(STATUS "CUDA found: ${CUDA_VERSION}")
+    else()
+        message(WARNING "CUDA requested but not found. Disabling CUDA support.")
+        set(USE_CUDA OFF)
+    endif()
+endif()
+
+# Add OpenMP support (optional)
+option(USE_OPENMP "Enable OpenMP support" ON)
+if(USE_OPENMP)
+    find_package(OpenMP)
+    if(OpenMP_CXX_FOUND)
+        add_definitions(-DUSE_OPENMP)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+        message(STATUS "OpenMP found: ${OpenMP_CXX_VERSION}")
+    else()
+        message(WARNING "OpenMP requested but not found. Disabling OpenMP support.")
+        set(USE_OPENMP OFF)
+    endif()
+endif()
+
+# Add SLEPc support (optional)
+option(USE_SLEPC "Enable SLEPc support" OFF)
+if(USE_SLEPC)
+    find_package(PETSc QUIET)
+    find_package(SLEPc QUIET)
+    if(PETSC_FOUND AND SLEPC_FOUND)
+        add_definitions(-DUSE_SLEPC)
+        include_directories(${PETSC_INCLUDES} ${SLEPC_INCLUDES})
+        message(STATUS "PETSc found: ${PETSC_VERSION}")
+        message(STATUS "SLEPc found: ${SLEPC_VERSION}")
+    else()
+        message(WARNING "SLEPc requested but not found. Disabling SLEPc support.")
+        set(USE_SLEPC OFF)
+    endif()
+endif()
+
 # Include directories
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -41,7 +87,25 @@ set(SOURCES
     src/simple_self_consistent.cpp
     src/basic_solver.cpp
     src/improved_self_consistent.cpp
+    src/error_estimator.cpp
+    src/mesh_quality.cpp
+    src/adaptive_refinement.cpp
+    src/memory_efficient.cpp
+    src/parallel_eigensolver.cpp
+    src/gpu_accelerator.cpp
+    src/spin_orbit.cpp
+    src/error_handling.cpp
 )
+
+# CUDA source files
+if(USE_CUDA)
+    set(CUDA_SOURCES
+        src/gpu_kernels.cu
+    )
+
+    # Compile CUDA sources
+    cuda_add_library(gpu_kernels STATIC ${CUDA_SOURCES})
+endif()
 
 # Create the main Python module
 pybind11_add_module(qdsim_cpp src/bindings.cpp ${SOURCES})
@@ -49,12 +113,43 @@ pybind11_add_module(qdsim_cpp src/bindings.cpp ${SOURCES})
 # Create the FEInterpolator module
 pybind11_add_module(fe_interpolator_module src/fe_interpolator_module.cpp src/mesh.cpp src/fe_interpolator.cpp src/adaptive_mesh_simple.cpp)
 
-# Link MPI if enabled
+# Link libraries
 if(USE_MPI)
     target_link_libraries(qdsim_cpp PRIVATE ${MPI_CXX_LIBRARIES})
     target_link_libraries(fe_interpolator_module PRIVATE ${MPI_CXX_LIBRARIES})
 endif()
 
+if(USE_CUDA)
+    target_link_libraries(qdsim_cpp PRIVATE gpu_kernels ${CUDA_LIBRARIES} ${CUDA_CUBLAS_LIBRARIES} ${CUDA_cusolver_LIBRARY})
+endif()
+
+if(USE_SLEPC)
+    target_link_libraries(qdsim_cpp PRIVATE ${PETSC_LIBRARIES} ${SLEPC_LIBRARIES})
+endif()
+
+if(USE_OPENMP)
+    target_link_libraries(qdsim_cpp PRIVATE OpenMP::OpenMP_CXX)
+endif()
+
+# Find and link Spectra library for eigenvalue computations
+find_package(Spectra QUIET)
+if(Spectra_FOUND)
+    target_link_libraries(qdsim_cpp PRIVATE Spectra::Spectra)
+    add_definitions(-DUSE_SPECTRA)
+else()
+    message(STATUS "Spectra library not found. Using Eigen's built-in eigensolvers.")
+endif()
+
 # Install the modules
 install(TARGETS qdsim_cpp DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}/../frontend/qdsim)
 install(TARGETS fe_interpolator_module DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}/../frontend/qdsim)
+
+# Print configuration summary
+message(STATUS "")
+message(STATUS "QDSim C++ Configuration Summary:")
+message(STATUS "  MPI support:       ${USE_MPI}")
+message(STATUS "  CUDA support:      ${USE_CUDA}")
+message(STATUS "  OpenMP support:    ${USE_OPENMP}")
+message(STATUS "  SLEPc support:     ${USE_SLEPC}")
+message(STATUS "  Spectra support:   ${Spectra_FOUND}")
+message(STATUS "")
