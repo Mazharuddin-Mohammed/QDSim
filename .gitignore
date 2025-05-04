@@ -75,6 +75,7 @@ venv.bak/
 
 # Project specific
 data/meshes/
+*.txt
 *.txt.user
 *.log
 *.vtk
@@ -85,12 +86,17 @@ data/meshes/
 *.json
 !package.json
 !package-lock.json
+!CMakeLists.txt
+!README*.txt
 
 # Output files
 *.png
+*.jpg
+*.jpeg
 *.pdf
 plots/
 results_2d/
+results/
 
 # Test outputs
 Testing/
