@@ -51,6 +51,9 @@ class Config:
         # Temperature
         self.temperature = 300            # Temperature (K)
 
+        self.tolerance = 1e-6  # Self-consistency tolerance
+        self.max_iter = 500    # Max self-consistent iterations
+
     def validate(self):
         """Validate configuration parameters for physical consistency."""
         # Basic validation
@@ -74,6 +77,9 @@ class Config:
 
         # CAP validation
         assert self.eta >= 0, "CAP strength must be non-negative"
+
+        assert self.tolerance > 0, "Tolerance must be positive"
+        assert self.max_iter > 0, "Max iterations must be positive"
 
         return True
 

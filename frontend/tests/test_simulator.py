@@ -10,6 +10,7 @@ def test_simulator_initialization():
     assert sim.config is not None
     assert sim.mesh is not None
     assert sim.poisson is not None
+    assert sim.sc_solver is not None
     assert sim.fem is not None
     assert sim.solver is not None
 

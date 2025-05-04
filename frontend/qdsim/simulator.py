@@ -76,6 +76,57 @@ class Simulator:
             except Exception as e:
                 print(f"Warning: Failed to solve Poisson equation: {e}")
 
+            # Try to use C++ SelfConsistentSolver if available
+            try:
+                self.sc_solver = qdsim_cpp.SelfConsistentSolver(
+                    self.mesh, self.epsilon_r, self.charge_density,
+                    self.electron_concentration, self.hole_concentration,
+                    self.mobility_n, self.mobility_p
+                )
+            except (AttributeError, ImportError) as e:
+                print(f"Warning: C++ SelfConsistentSolver not available: {e}")
+                print("Falling back to Python implementation")
+                # Import the Python implementation from the example
+                try:
+                    from examples.chromium_qd_ingaas_diode import SelfConsistentSolver
+                    self.sc_solver = SelfConsistentSolver(
+                        self.mesh, self.epsilon_r, self.charge_density,
+                        self.electron_concentration, self.hole_concentration,
+                        self.mobility_n, self.mobility_p
+                    )
+                except ImportError:
+                    print("Warning: Could not import SelfConsistentSolver from example")
+                    # Create a minimal implementation
+                    # Create a reference to self.mesh for the inner class
+                    mesh_ref = self.mesh
+
+                    class SimpleSelfConsistentSolver:
+                        def __init__(self, *args):
+                            self.mesh = mesh_ref
+                            self.phi = np.zeros(mesh_ref.get_num_nodes())
+                            self.n = np.zeros(mesh_ref.get_num_nodes())
+                            self.p = np.zeros(mesh_ref.get_num_nodes())
+
+                        def solve(self, *args, **kwargs):
+                            pass
+
+                        def get_potential(self):
+                            return self.phi
+
+                        def get_n(self):
+                            return self.n
+
+                        def get_p(self):
+                            return self.p
+
+                        def get_electric_field(self, x, y):
+                            return np.array([0.0, 0.0])
+
+                    self.sc_solver = SimpleSelfConsistentSolver()
+
+            self.sc_solver.solve(0.0, self.built_in_potential() + config.V_r,
+                            config.N_A, config.N_D, config.tolerance, config.max_iter)
+
             # Initialize the Hamiltonian and mass matrices
             num_nodes = self.mesh.get_num_nodes()
             self.H = np.zeros((num_nodes, num_nodes), dtype=np.complex128)
@@ -126,9 +177,24 @@ class Simulator:
         n_mat = self.db.get_material(self.config.diode_n_material)
         return qdsim_cpp.epsilon_r(x, y, p_mat, n_mat)
 
-    def charge_density(self, x, y):
-        return qdsim_cpp.charge_density(x, y, self.config.N_A, self.config.N_D, self.depletion_width())
+    def charge_density(self, x, y, n, p):
+        return qdsim_cpp.charge_density(x, y, n, p)
 
+    def electron_concentration(self, x, y, phi):
+        mat = self.db.get_material(self.config.diode_p_material if x < 0 else self.config.diode_n_material)
+        return qdsim_cpp.electron_concentration(x, y, phi, mat)
+
+    def hole_concentration(self, x, y, phi):
+        mat = self.db.get_material(self.config.diode_p_material if x < 0 else self.config.diode_n_material)
+        return qdsim_cpp.hole_concentration(x, y, phi, mat)
+
+    def mobility_n(self, x, y):
+        mat = self.db.get_material(self.config.diode_p_material if x < 0 else self.config.diode_n_material)
+        return qdsim_cpp.mobility_n(x, y, mat)
+
+    def mobility_p(self, x, y):
+        mat = self.db.get_material(self.config.diode_p_material if x < 0 else self.config.diode_n_material)
+        return qdsim_cpp.mobility_p(x, y, mat)
     def cap(self, x, y):
         return qdsim_cpp.cap(x, y, self.config.eta, self.config.Lx, self.config.Ly, self.config.Lx / 10)
 
