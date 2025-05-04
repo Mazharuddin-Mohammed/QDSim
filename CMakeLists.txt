@@ -27,6 +27,7 @@ set(SOURCES
     backend/src/adaptive_mesh.cpp
     backend/src/normalization.cpp
     backend/src/poisson.cpp
+    backend/src/self_consistent.cpp
     backend/src/materials.cpp
     backend/src/bindings.cpp
 )
@@ -51,6 +52,7 @@ if(BUILD_TESTING)
             backend/tests/test_adaptive_mesh.cpp
             backend/tests/test_normalization.cpp
             backend/tests/test_poisson.cpp
+            backend/tests/test_self_consistent.cpp
             backend/tests/test_materials.cpp
         )
 

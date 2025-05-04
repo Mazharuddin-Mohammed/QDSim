@@ -37,6 +37,10 @@ set(SOURCES
     src/adaptive_mesh_simple.cpp
     src/normalization.cpp
     src/fe_interpolator.cpp
+    src/self_consistent.cpp
+    src/simple_self_consistent.cpp
+    src/basic_solver.cpp
+    src/improved_self_consistent.cpp
 )
 
 # Create the main Python module
