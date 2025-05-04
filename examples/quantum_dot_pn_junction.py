@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
 Example script for simulating a quantum dot in a p-n junction using the ImprovedSelfConsistentSolver.
+
+This script demonstrates how to use the ImprovedSelfConsistentSolver to simulate
+a quantum dot embedded in a p-n junction. It shows how to define material properties,
+set up the geometry, and solve the coupled Poisson-drift-diffusion equations.
+
+Author: Dr. Mazharuddin Mohammed
 """
 
 import sys

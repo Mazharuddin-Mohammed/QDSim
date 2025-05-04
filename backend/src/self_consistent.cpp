@@ -1,3 +1,16 @@
+/**
+ * @file self_consistent.cpp
+ * @brief Implementation of the SelfConsistentSolver class.
+ *
+ * This file contains the implementation of the SelfConsistentSolver class,
+ * which provides a solver for the self-consistent Poisson-drift-diffusion
+ * equations used in semiconductor device simulations. It couples the Poisson equation
+ * for the electrostatic potential with the drift-diffusion equations for carrier
+ * transport.
+ *
+ * Author: Dr. Mazharuddin Mohammed
+ */
+
 #include "self_consistent.h"
 #include <Eigen/SparseCholesky>
 #include <cmath>

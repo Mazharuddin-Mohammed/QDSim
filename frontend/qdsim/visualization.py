@@ -1,3 +1,12 @@
+"""
+Visualization module for QDSim.
+
+This module provides functions for visualizing quantum dot simulation results,
+including wavefunctions, potentials, electric fields, and energy shifts.
+
+Author: Dr. Mazharuddin Mohammed
+"""
+
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize

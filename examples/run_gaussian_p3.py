@@ -1,4 +1,14 @@
-# run_gaussian_p3.py
+#!/usr/bin/env python3
+"""
+Example script for running a Gaussian potential simulation with P3 elements.
+
+This script demonstrates how to set up and run a quantum dot simulation with
+a Gaussian potential well and cubic (P3) finite elements, which provide higher
+accuracy for smooth solutions.
+
+Author: Dr. Mazharuddin Mohammed
+"""
+
 from qdsim import Simulator, Config
 from qdsim.visualization import plot_wavefunction
 import matplotlib.pyplot as plt

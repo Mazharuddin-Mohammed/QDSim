@@ -1,3 +1,14 @@
+/**
+ * @file utils.cpp
+ * @brief Implementation of utility functions for QDSim.
+ *
+ * This file contains the implementation of utility functions for QDSim,
+ * including functions for saving matrices to files, converting between
+ * different units, and other helper functions.
+ *
+ * Author: Dr. Mazharuddin Mohammed
+ */
+
 #include "utils.h"
 #include <fstream>
 

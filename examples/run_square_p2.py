@@ -1,4 +1,14 @@
-# run_square_p2.py
+#!/usr/bin/env python3
+"""
+Example script for running a square potential simulation with P2 elements.
+
+This script demonstrates how to set up and run a quantum dot simulation with
+a square potential well and quadratic (P2) finite elements, which provide a
+good balance between accuracy and computational efficiency.
+
+Author: Dr. Mazharuddin Mohammed
+"""
+
 from qdsim import Simulator, Config
 
 config = Config()

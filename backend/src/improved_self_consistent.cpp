@@ -1,3 +1,15 @@
+/**
+ * @file improved_self_consistent.cpp
+ * @brief Implementation of the ImprovedSelfConsistentSolver class.
+ *
+ * This file contains the implementation of the ImprovedSelfConsistentSolver class,
+ * which provides a more robust approach to solving the coupled Poisson-drift-diffusion
+ * equations self-consistently to model semiconductor devices, with proper error handling
+ * and convergence acceleration techniques.
+ *
+ * Author: Dr. Mazharuddin Mohammed
+ */
+
 #include "improved_self_consistent.h"
 #include <iostream>
 #include <cmath>

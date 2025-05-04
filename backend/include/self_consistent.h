@@ -1,4 +1,16 @@
 #pragma once
+/**
+ * @file self_consistent.h
+ * @brief Defines the SelfConsistentSolver class for semiconductor device simulations.
+ *
+ * This file contains the declaration of the SelfConsistentSolver class, which implements
+ * a solver for the self-consistent Poisson-drift-diffusion equations used in semiconductor
+ * device simulations. It couples the Poisson equation for the electrostatic potential
+ * with the drift-diffusion equations for carrier transport.
+ *
+ * Author: Dr. Mazharuddin Mohammed
+ */
+
 #include "mesh.h"
 #include "poisson.h"
 #include "materials.h"

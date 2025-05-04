@@ -1,3 +1,14 @@
+/**
+ * @file simple_self_consistent.cpp
+ * @brief Implementation of the SimpleSelfConsistentSolver class.
+ *
+ * This file contains the implementation of the SimpleSelfConsistentSolver class,
+ * which provides a simplified approach to solving the coupled Poisson-drift-diffusion
+ * equations self-consistently to model semiconductor devices.
+ *
+ * Author: Dr. Mazharuddin Mohammed
+ */
+
 #include "simple_self_consistent.h"
 #include <iostream>
 #include <cmath>

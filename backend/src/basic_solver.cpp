@@ -1,3 +1,14 @@
+/**
+ * @file basic_solver.cpp
+ * @brief Implementation of the BasicSolver class.
+ *
+ * This file contains the implementation of the BasicSolver class, which provides
+ * a simple solver for demonstration purposes. It sets up basic fields without
+ * doing any actual solving and is meant to be used as a test for the Python bindings.
+ *
+ * Author: Dr. Mazharuddin Mohammed
+ */
+
 #include "basic_solver.h"
 #include <iostream>
 #include <cmath>

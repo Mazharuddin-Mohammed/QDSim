@@ -1,5 +1,11 @@
 """
 Parallel implementation of finite element interpolation.
+
+This module provides a parallel implementation of finite element interpolation
+for efficient computation of field values and gradients at multiple points.
+It uses multithreading to distribute the workload across multiple CPU cores.
+
+Author: Dr. Mazharuddin Mohammed
 """
 
 import numpy as np
