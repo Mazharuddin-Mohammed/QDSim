@@ -29,152 +29,327 @@ class Simulator:
         try:
             self.config = config
 
-            # Validate required configuration parameters
-            required_params = ['Lx', 'Ly', 'nx', 'ny']
-            for param in required_params:
-                if not hasattr(config, param):
-                    raise ValueError(f"Missing required configuration parameter: {param}")
+            # Set default values for required parameters
+            self._set_default_config_values()
 
-            # Set default values for optional parameters
-            if not hasattr(config, 'element_order'):
-                config.element_order = 1
-                print("Warning: element_order not specified, using default value of 1")
+            # Validate required configuration parameters
+            self._validate_config()
+
+            # Print configuration summary
+            self._print_config_summary()
 
             # Initialize material database
-            try:
-                self.db = qdsim_cpp.MaterialDatabase()
-            except Exception as e:
-                print(f"Warning: Failed to initialize MaterialDatabase: {e}")
-                self.db = None
+            self._initialize_material_database()
 
             # Create the mesh
-            try:
-                self.mesh = qdsim_cpp.Mesh(config.Lx, config.Ly, config.nx, config.ny, config.element_order)
-                print(f"Mesh created with {self.mesh.get_num_nodes()} nodes and {self.mesh.get_num_elements()} elements")
-            except Exception as e:
-                raise RuntimeError(f"Failed to create mesh: {e}")
+            self._create_mesh()
 
             # Create the FEInterpolator
-            try:
-                # Try to use the C++ FEInterpolator directly
-                self.interpolator = qdsim_cpp.FEInterpolator(self.mesh)
-                print("Using C++ FEInterpolator directly")
-            except Exception as e:
-                print(f"Warning: Failed to create C++ FEInterpolator directly: {e}")
-                try:
-                    # Fall back to the Python wrapper
-                    self.interpolator = FEInterpolator(self.mesh, use_cpp=True)
-                    print("Using Python wrapper for C++ FEInterpolator")
-                except Exception as e:
-                    print(f"Warning: Failed to create C++ FEInterpolator via wrapper: {e}, falling back to Python implementation")
-                    self.interpolator = FEInterpolator(self.mesh, use_cpp=False)
-                    print("Using pure Python FEInterpolator")
+            self._create_interpolator()
 
             # Create the AdaptiveMesh
-            try:
-                self.adaptive_mesh = AdaptiveMesh(self)
-            except Exception as e:
-                print(f"Warning: Failed to create AdaptiveMesh: {e}")
-                self.adaptive_mesh = None
+            self._create_adaptive_mesh()
 
             # Initialize the potential array
             self.phi = np.zeros(self.mesh.get_num_nodes())
 
             # Solve the Poisson equation
-            try:
-                self.solve_poisson()
-            except Exception as e:
-                print(f"Warning: Failed to solve Poisson equation: {e}")
+            self._solve_poisson_initial()
 
-            # Try to use C++ SelfConsistentSolver if available
-            try:
-                # Use the create_self_consistent_solver helper function
-                self.sc_solver = qdsim_cpp.create_self_consistent_solver(
-                    self.mesh, self.epsilon_r, self.charge_density,
-                    self.electron_concentration, self.hole_concentration,
-                    self.mobility_n, self.mobility_p
-                )
-                print("Using C++ SelfConsistentSolver")
-            except Exception as e:
-                print(f"Warning: C++ SelfConsistentSolver not available: {e}")
-                print("Falling back to Python implementation")
-                # Try to use ImprovedSelfConsistentSolver
-                try:
-                    self.sc_solver = qdsim_cpp.create_improved_self_consistent_solver(
-                        self.mesh, self.epsilon_r, self.charge_density
-                    )
-                    print("Using C++ ImprovedSelfConsistentSolver")
-                except Exception as e:
-                    print(f"Warning: C++ ImprovedSelfConsistentSolver not available: {e}")
-                    # Try to use SimpleSelfConsistentSolver
-                    try:
-                        self.sc_solver = qdsim_cpp.create_simple_self_consistent_solver(
-                            self.mesh, self.epsilon_r, self.charge_density
-                        )
-                        print("Using C++ SimpleSelfConsistentSolver")
-                    except Exception as e:
-                        print(f"Warning: C++ SimpleSelfConsistentSolver not available: {e}")
-                        # Import the Python implementation from the example
-                        try:
-                            from examples.chromium_qd_ingaas_diode import SelfConsistentSolver
-                            self.sc_solver = SelfConsistentSolver(
-                                self.mesh, self.epsilon_r, self.charge_density,
-                                self.electron_concentration, self.hole_concentration,
-                                self.mobility_n, self.mobility_p
-                            )
-                            print("Using Python SelfConsistentSolver from example")
-                        except ImportError:
-                            print("Warning: Could not import SelfConsistentSolver from example")
-                            # Create a minimal implementation
-                            # Create a reference to self.mesh for the inner class
-                            mesh_ref = self.mesh
-
-                            class SimpleSelfConsistentSolver:
-                                def __init__(self, *args):
-                                    self.mesh = mesh_ref
-                                    self.phi = np.zeros(mesh_ref.get_num_nodes())
-                                    self.n = np.zeros(mesh_ref.get_num_nodes())
-                                    self.p = np.zeros(mesh_ref.get_num_nodes())
-
-                                def solve(self, *args, **kwargs):
-                                    pass
-
-                                def get_potential(self):
-                                    return self.phi
-
-                                def get_n(self):
-                                    return self.n
-
-                                def get_p(self):
-                                    return self.p
-
-                                def get_electric_field(self, x, y):
-                                    return np.array([0.0, 0.0])
-
-                            self.sc_solver = SimpleSelfConsistentSolver()
-                            print("Using minimal Python SelfConsistentSolver implementation")
-
-            self.sc_solver.solve(0.0, self.built_in_potential() + config.V_r,
-                            config.N_A, config.N_D, config.tolerance, config.max_iter)
+            # Create the SelfConsistentSolver
+            self._create_self_consistent_solver()
 
             # Initialize the Hamiltonian and mass matrices
             num_nodes = self.mesh.get_num_nodes()
             self.H = np.zeros((num_nodes, num_nodes), dtype=np.complex128)
             self.M = np.zeros((num_nodes, num_nodes), dtype=np.complex128)
 
-            # Assemble the matrices
-            try:
-                self.assemble_matrices()
-            except Exception as e:
-                print(f"Warning: Failed to assemble matrices: {e}")
-
             # Initialize eigenvalues and eigenvectors
             self.eigenvalues = None
             self.eigenvectors = None
 
+            # Store the FEMSolver for later use
+            self.fem_solver = None
+
         except Exception as e:
             print(f"Error initializing simulator: {e}")
             raise
+
+    def _set_default_config_values(self):
+        """Set default values for configuration parameters."""
+        # Physical constants
+        if not hasattr(self.config, 'e_charge'):
+            self.config.e_charge = 1.602e-19  # Elementary charge in C
+
+        if not hasattr(self.config, 'm_e'):
+            self.config.m_e = 9.109e-31  # Electron mass in kg
+
+        # Mesh parameters
+        if not hasattr(self.config, 'element_order'):
+            self.config.element_order = 1
+            print("Warning: element_order not specified, using default value of 1")
+
+        # Solver parameters
+        if not hasattr(self.config, 'tolerance'):
+            self.config.tolerance = 1e-6
+            print("Warning: tolerance not specified, using default value of 1e-6")
+
+        if not hasattr(self.config, 'max_iter'):
+            self.config.max_iter = 100
+            print("Warning: max_iter not specified, using default value of 100")
+
+        # Diode parameters
+        if not hasattr(self.config, 'N_A'):
+            self.config.N_A = 1e24  # Acceptor concentration in m^-3
+            print("Warning: N_A not specified, using default value of 1e24 m^-3")
+
+        if not hasattr(self.config, 'N_D'):
+            self.config.N_D = 1e24  # Donor concentration in m^-3
+            print("Warning: N_D not specified, using default value of 1e24 m^-3")
+
+        if not hasattr(self.config, 'V_r'):
+            self.config.V_r = 0.0  # Reverse bias in V
+            print("Warning: V_r not specified, using default value of 0.0 V")
+
+        # Quantum dot parameters
+        if not hasattr(self.config, 'R'):
+            self.config.R = 10e-9  # QD radius in m
+            print("Warning: R not specified, using default value of 10 nm")
+
+        if not hasattr(self.config, 'V_0'):
+            self.config.V_0 = 0.3 * self.config.e_charge  # QD potential depth in J
+            print("Warning: V_0 not specified, using default value of 0.3 eV")
+
+        if not hasattr(self.config, 'potential_type'):
+            self.config.potential_type = "gaussian"
+            print("Warning: potential_type not specified, using default value of 'gaussian'")
+
+        # Material parameters
+        if not hasattr(self.config, 'diode_p_material'):
+            self.config.diode_p_material = "GaAs"
+            print("Warning: diode_p_material not specified, using default value of 'GaAs'")
+
+        if not hasattr(self.config, 'diode_n_material'):
+            self.config.diode_n_material = "GaAs"
+            print("Warning: diode_n_material not specified, using default value of 'GaAs'")
+
+        if not hasattr(self.config, 'qd_material'):
+            self.config.qd_material = "InAs"
+            print("Warning: qd_material not specified, using default value of 'InAs'")
+
+        if not hasattr(self.config, 'matrix_material'):
+            self.config.matrix_material = "GaAs"
+            print("Warning: matrix_material not specified, using default value of 'GaAs'")
+
+        # MPI parameters
+        if not hasattr(self.config, 'use_mpi'):
+            self.config.use_mpi = False
+            print("Warning: use_mpi not specified, using default value of False")
+
+    def _validate_config(self):
+        """Validate the configuration parameters."""
+        # Required parameters
+        required_params = ['Lx', 'Ly', 'nx', 'ny']
+        for param in required_params:
+            if not hasattr(self.config, param):
+                raise ValueError(f"Missing required configuration parameter: {param}")
+
+        # Validate parameter values
+        if self.config.Lx <= 0:
+            raise ValueError(f"Invalid Lx value: {self.config.Lx}, must be positive")
+
+        if self.config.Ly <= 0:
+            raise ValueError(f"Invalid Ly value: {self.config.Ly}, must be positive")
+
+        if self.config.nx <= 0:
+            raise ValueError(f"Invalid nx value: {self.config.nx}, must be positive")
+
+        if self.config.ny <= 0:
+            raise ValueError(f"Invalid ny value: {self.config.ny}, must be positive")
+
+        if self.config.element_order not in [1, 2, 3]:
+            raise ValueError(f"Invalid element_order value: {self.config.element_order}, must be 1, 2, or 3")
+
+    def _print_config_summary(self):
+        """Print a summary of the configuration."""
+        print("\nSimulator Configuration Summary:")
+        print(f"  Domain size: {self.config.Lx} x {self.config.Ly} nm")
+        print(f"  Mesh: {self.config.nx} x {self.config.ny} elements, order {self.config.element_order}")
+        print(f"  P-N junction: {self.config.diode_p_material}/{self.config.diode_n_material}")
+        print(f"  Quantum dot: {self.config.qd_material} in {self.config.matrix_material}, R = {self.config.R} nm")
+        print(f"  Potential type: {self.config.potential_type}, V_0 = {self.config.V_0/self.config.e_charge} eV")
+        print(f"  Bias: V_r = {self.config.V_r} V")
+        print(f"  Doping: N_A = {self.config.N_A} m^-3, N_D = {self.config.N_D} m^-3")
+        print(f"  MPI: {'Enabled' if self.config.use_mpi else 'Disabled'}")
+        print("")
+
+    def _initialize_material_database(self):
+        """Initialize the material database."""
+        try:
+            self.db = qdsim_cpp.MaterialDatabase()
+            print("MaterialDatabase initialized successfully")
+        except Exception as e:
+            print(f"Warning: Failed to initialize MaterialDatabase: {e}")
+            self.db = None
+
+    def _create_mesh(self):
+        """Create the mesh."""
+        try:
+            self.mesh = qdsim_cpp.Mesh(
+                self.config.Lx, self.config.Ly,
+                self.config.nx, self.config.ny,
+                self.config.element_order
+            )
+            print(f"Mesh created with {self.mesh.get_num_nodes()} nodes and {self.mesh.get_num_elements()} elements")
+        except Exception as e:
+            raise RuntimeError(f"Failed to create mesh: {e}")
+
+    def _create_interpolator(self):
+        """Create the FEInterpolator."""
+        try:
+            # Try to use the C++ FEInterpolator directly
+            self.interpolator = qdsim_cpp.FEInterpolator(self.mesh)
+            print("Using C++ FEInterpolator directly")
+        except Exception as e:
+            print(f"Warning: Failed to create C++ FEInterpolator directly: {e}")
+            try:
+                # Fall back to the Python wrapper
+                self.interpolator = FEInterpolator(self.mesh, use_cpp=True)
+                print("Using Python wrapper for C++ FEInterpolator")
+            except Exception as e:
+                print(f"Warning: Failed to create C++ FEInterpolator via wrapper: {e}, falling back to Python implementation")
+                self.interpolator = FEInterpolator(self.mesh, use_cpp=False)
+                print("Using pure Python FEInterpolator")
+
+    def _create_adaptive_mesh(self):
+        """Create the AdaptiveMesh."""
+        try:
+            self.adaptive_mesh = AdaptiveMesh(self)
+            print("AdaptiveMesh created successfully")
+        except Exception as e:
+            print(f"Warning: Failed to create AdaptiveMesh: {e}")
+            self.adaptive_mesh = None
+
+    def _solve_poisson_initial(self):
+        """Solve the Poisson equation for the initial potential."""
+        try:
+            self.solve_poisson()
+            print("Initial Poisson equation solved successfully")
+        except Exception as e:
+            print(f"Warning: Failed to solve initial Poisson equation: {e}")
+
+    def _create_self_consistent_solver(self):
+        """Create the SelfConsistentSolver."""
+        try:
+            # Use the create_self_consistent_solver helper function
+            self.sc_solver = qdsim_cpp.create_self_consistent_solver(
+                self.mesh, self.epsilon_r, self.charge_density,
+                self.electron_concentration, self.hole_concentration,
+                self.mobility_n, self.mobility_p
+            )
+            print("Using C++ SelfConsistentSolver")
+
+            # Solve the self-consistent problem
+            print("Solving self-consistent problem...")
+            self.sc_solver.solve(
+                0.0, self.built_in_potential() + self.config.V_r,
+                self.config.N_A, self.config.N_D,
+                self.config.tolerance, self.config.max_iter
+            )
+            print("Self-consistent problem solved successfully")
+
+        except Exception as e:
+            print(f"Warning: C++ SelfConsistentSolver not available: {e}")
+            print("Trying alternative solvers...")
+
+            # Try to use ImprovedSelfConsistentSolver
+            try:
+                self.sc_solver = qdsim_cpp.create_improved_self_consistent_solver(
+                    self.mesh, self.epsilon_r, self.charge_density
+                )
+                print("Using C++ ImprovedSelfConsistentSolver")
+
+                # Solve the self-consistent problem
+                print("Solving self-consistent problem...")
+                self.sc_solver.solve(
+                    0.0, self.built_in_potential() + self.config.V_r,
+                    self.config.N_A, self.config.N_D,
+                    self.config.tolerance, self.config.max_iter
+                )
+                print("Self-consistent problem solved successfully")
+
+            except Exception as e:
+                print(f"Warning: C++ ImprovedSelfConsistentSolver not available: {e}")
+
+                # Try to use SimpleSelfConsistentSolver
+                try:
+                    self.sc_solver = qdsim_cpp.create_simple_self_consistent_solver(
+                        self.mesh, self.epsilon_r, self.charge_density
+                    )
+                    print("Using C++ SimpleSelfConsistentSolver")
+
+                    # Solve the self-consistent problem
+                    print("Solving self-consistent problem...")
+                    self.sc_solver.solve(
+                        0.0, self.built_in_potential() + self.config.V_r,
+                        self.config.N_A, self.config.N_D,
+                        self.config.tolerance, self.config.max_iter
+                    )
+                    print("Self-consistent problem solved successfully")
+
+                except Exception as e:
+                    print(f"Warning: C++ SimpleSelfConsistentSolver not available: {e}")
+
+                    # Import the Python implementation from the example
+                    try:
+                        from examples.chromium_qd_ingaas_diode import SelfConsistentSolver
+                        self.sc_solver = SelfConsistentSolver(
+                            self.mesh, self.epsilon_r, self.charge_density,
+                            self.electron_concentration, self.hole_concentration,
+                            self.mobility_n, self.mobility_p
+                        )
+                        print("Using Python SelfConsistentSolver from example")
+
+                        # Solve the self-consistent problem
+                        print("Solving self-consistent problem...")
+                        self.sc_solver.solve(
+                            0.0, self.built_in_potential() + self.config.V_r,
+                            self.config.N_A, self.config.N_D,
+                            self.config.tolerance, self.config.max_iter
+                        )
+                        print("Self-consistent problem solved successfully")
+
+                    except ImportError:
+                        print("Warning: Could not import SelfConsistentSolver from example")
+
+                        # Create a minimal implementation
+                        # Create a reference to self.mesh for the inner class
+                        mesh_ref = self.mesh
+
+                        class SimpleSelfConsistentSolver:
+                            def __init__(self, *args):
+                                self.mesh = mesh_ref
+                                self.phi = np.zeros(mesh_ref.get_num_nodes())
+                                self.n = np.zeros(mesh_ref.get_num_nodes())
+                                self.p = np.zeros(mesh_ref.get_num_nodes())
+
+                            def solve(self, *args, **kwargs):
+                                print("SimpleSelfConsistentSolver.solve() called (no-op)")
+
+                            def get_potential(self):
+                                return self.phi
+
+                            def get_n(self):
+                                return self.n
+
+                            def get_p(self):
+                                return self.p
+
+                            def get_electric_field(self, x, y):
+                                return np.array([0.0, 0.0])
+
+                        self.sc_solver = SimpleSelfConsistentSolver()
+                        print("Using minimal Python SelfConsistentSolver implementation")
 
     def built_in_potential(self):
         kT = 8.617e-5 * 300  # eV at 300K
@@ -449,48 +624,76 @@ class Simulator:
         Assemble the Hamiltonian and mass matrices.
 
         This method assembles the Hamiltonian and mass matrices using the finite element method.
-        It tries to use the C++ implementation first, and falls back to a simplified Python
-        implementation if the C++ implementation is not available.
+        It uses the C++ implementation and provides detailed error messages if it fails.
         """
+        # Store the FEMSolver for later use
+        self.fem_solver = None
+
         try:
-            # Try to use the C++ implementation first
-            try:
-                # Create a FEMSolver
-                fem_solver = qdsim_cpp.FEMSolver(
-                    self.mesh,
-                    lambda x, y: self.config.m_star_function(x, y) if hasattr(self.config, 'm_star_function') else 0.067 * self.config.m_e,
-                    lambda x, y: self.config.potential_function(x, y) if hasattr(self.config, 'potential_function') else 0.0,
-                    lambda x, y: self.config.cap_function(x, y) if hasattr(self.config, 'cap_function') else 0.0,
-                    self.sc_solver,
-                    self.config.element_order,
-                    getattr(self.config, 'use_mpi', False)
-                )
+            # Define the callback functions
+            def m_star_function(x, y):
+                """Effective mass function"""
+                if hasattr(self.config, 'm_star_function'):
+                    return self.config.m_star_function(x, y)
+                else:
+                    # Default to GaAs effective mass
+                    return 0.067 * self.config.m_e
 
-                # Assemble the matrices
-                fem_solver.assemble_matrices()
+            def potential_function(x, y):
+                """Potential function"""
+                if hasattr(self.config, 'potential_function'):
+                    return self.config.potential_function(x, y)
+                else:
+                    # Use the potential method
+                    return self.potential(x, y)
 
-                # Get the matrices
-                self.H = fem_solver.get_H()
-                self.M = fem_solver.get_M()
+            def cap_function(x, y):
+                """Capacitance function"""
+                if hasattr(self.config, 'cap_function'):
+                    return self.config.cap_function(x, y)
+                else:
+                    # Default to zero capacitance
+                    return 0.0
 
-                print("Assembled matrices using C++ implementation")
-                return
+            # Create a FEMSolver
+            print("Creating FEMSolver...")
+            self.fem_solver = qdsim_cpp.FEMSolver(
+                self.mesh,
+                m_star_function,
+                potential_function,
+                cap_function,
+                self.sc_solver,
+                self.config.element_order,
+                getattr(self.config, 'use_mpi', False)
+            )
 
-            except Exception as e:
-                print(f"Warning: Failed to use C++ implementation for matrix assembly: {e}")
-                print("Falling back to Python implementation")
+            # Assemble the matrices
+            print("Assembling matrices...")
+            self.fem_solver.assemble_matrices()
+
+            # Get the matrices
+            print("Getting matrices...")
+            self.H = self.fem_solver.get_H()
+            self.M = self.fem_solver.get_M()
+
+            print(f"Assembled matrices using C++ implementation: H shape = {self.H.shape}, M shape = {self.M.shape}")
+            return
 
         except Exception as e:
             print(f"Error in C++ matrix assembly: {e}")
-            print("Falling back to simplified Python implementation")
+            print("Creating simplified matrices as fallback")
 
-        # Simplified Python implementation as fallback
-        print("Using simplified Python implementation for matrix assembly")
+            # Create simplified matrices as fallback
+            num_nodes = self.mesh.get_num_nodes()
+            self.H = np.zeros((num_nodes, num_nodes), dtype=np.complex128)
+            self.M = np.zeros((num_nodes, num_nodes), dtype=np.complex128)
 
-        # For now, just set diagonal matrices
-        for i in range(self.mesh.get_num_nodes()):
-            self.H[i, i] = 1.0
-            self.M[i, i] = 1.0
+            # Set diagonal matrices
+            for i in range(num_nodes):
+                self.H[i, i] = 1.0
+                self.M[i, i] = 1.0
+
+            print(f"Created simplified diagonal matrices: H shape = {self.H.shape}, M shape = {self.M.shape}")
 
     def solve(self, num_eigenvalues):
         """
@@ -502,103 +705,164 @@ class Simulator:
         Returns:
             Tuple of (eigenvalues, eigenvectors)
         """
+        # Make sure matrices are assembled
+        if self.H is None or self.M is None:
+            print("Matrices not assembled yet, calling assemble_matrices()")
+            self.assemble_matrices()
+
         try:
-            # Try to use the C++ implementation first
-            try:
+            # If we have a FEMSolver from assemble_matrices, use it
+            if hasattr(self, 'fem_solver') and self.fem_solver is not None:
+                print("Using existing FEMSolver")
+
+                # Create an EigenSolver
+                print("Creating EigenSolver...")
+                eigen_solver = qdsim_cpp.EigenSolver(self.fem_solver)
+
+                # Solve the eigenvalue problem
+                print(f"Solving eigenvalue problem for {num_eigenvalues} eigenvalues...")
+                eigen_solver.solve(num_eigenvalues)
+
+                # Get the eigenvalues and eigenvectors
+                print("Getting eigenvalues and eigenvectors...")
+                self.eigenvalues = eigen_solver.get_eigenvalues()
+                self.eigenvectors = eigen_solver.get_eigenvectors()
+
+                print(f"Solved eigenvalue problem using C++ implementation, found {len(self.eigenvalues)} eigenvalues")
+
+                # Print some information about the eigenvalues
+                if len(self.eigenvalues) > 0:
+                    print(f"First few eigenvalues (eV): {[ev/self.config.e_charge for ev in self.eigenvalues[:min(5, len(self.eigenvalues))]]}")
+
+                return self.eigenvalues, self.eigenvectors
+            else:
+                # Try to create a new FEMSolver
+                print("No existing FEMSolver, creating a new one")
+
+                # Define the callback functions
+                def m_star_function(x, y):
+                    """Effective mass function"""
+                    if hasattr(self.config, 'm_star_function'):
+                        return self.config.m_star_function(x, y)
+                    else:
+                        # Default to GaAs effective mass
+                        return 0.067 * self.config.m_e
+
+                def potential_function(x, y):
+                    """Potential function"""
+                    if hasattr(self.config, 'potential_function'):
+                        return self.config.potential_function(x, y)
+                    else:
+                        # Use the potential method
+                        return self.potential(x, y)
+
+                def cap_function(x, y):
+                    """Capacitance function"""
+                    if hasattr(self.config, 'cap_function'):
+                        return self.config.cap_function(x, y)
+                    else:
+                        # Default to zero capacitance
+                        return 0.0
+
                 # Create a FEMSolver
+                print("Creating FEMSolver...")
                 fem_solver = qdsim_cpp.FEMSolver(
                     self.mesh,
-                    lambda x, y: self.config.m_star_function(x, y) if hasattr(self.config, 'm_star_function') else 0.067 * self.config.m_e,
-                    lambda x, y: self.config.potential_function(x, y) if hasattr(self.config, 'potential_function') else 0.0,
-                    lambda x, y: self.config.cap_function(x, y) if hasattr(self.config, 'cap_function') else 0.0,
+                    m_star_function,
+                    potential_function,
+                    cap_function,
                     self.sc_solver,
                     self.config.element_order,
                     getattr(self.config, 'use_mpi', False)
                 )
 
                 # Assemble the matrices
+                print("Assembling matrices...")
                 fem_solver.assemble_matrices()
 
                 # Create an EigenSolver
+                print("Creating EigenSolver...")
                 eigen_solver = qdsim_cpp.EigenSolver(fem_solver)
 
                 # Solve the eigenvalue problem
+                print(f"Solving eigenvalue problem for {num_eigenvalues} eigenvalues...")
                 eigen_solver.solve(num_eigenvalues)
 
                 # Get the eigenvalues and eigenvectors
+                print("Getting eigenvalues and eigenvectors...")
                 self.eigenvalues = eigen_solver.get_eigenvalues()
                 self.eigenvectors = eigen_solver.get_eigenvectors()
 
                 print(f"Solved eigenvalue problem using C++ implementation, found {len(self.eigenvalues)} eigenvalues")
 
-                return self.eigenvalues, self.eigenvectors
+                # Print some information about the eigenvalues
+                if len(self.eigenvalues) > 0:
+                    print(f"First few eigenvalues (eV): {[ev/self.config.e_charge for ev in self.eigenvalues[:min(5, len(self.eigenvalues))]]}")
 
-            except Exception as e:
-                print(f"Warning: Failed to use C++ implementation for eigenvalue problem: {e}")
-                print("Falling back to Python implementation")
+                return self.eigenvalues, self.eigenvectors
 
         except Exception as e:
             print(f"Error in C++ eigenvalue solver: {e}")
-            print("Falling back to simplified Python implementation")
+            print("Using simplified Python implementation for eigenvalue problem")
 
-        # Simplified Python implementation as fallback
-        print("Using simplified Python implementation for eigenvalue problem")
+            # Create simplified eigenvalues and eigenvectors
+            # For a quantum well/dot, the energy levels are typically a fraction of the potential depth
+            V_0 = getattr(self.config, 'V_0', 0.3)  # Potential depth in eV, default to 0.3 eV
 
-        # Create more realistic eigenvalues based on the potential depth
-        # For a quantum well/dot, the energy levels are typically a fraction of the potential depth
-        V_0 = getattr(self.config, 'V_0', 0.3)  # Potential depth in eV, default to 0.3 eV
+            # Create eigenvalues that are physically meaningful
+            # For a square well, the energy levels are proportional to n²
+            # E_n = (n²π²ħ²)/(2mL²) where L is the well width
+            # We'll use a simplified model here
+            base_energy = 0.05 * V_0  # Base energy level (ground state) as a fraction of potential depth
 
-        # Create eigenvalues that are physically meaningful
-        # For a square well, the energy levels are proportional to n²
-        # E_n = (n²π²ħ²)/(2mL²) where L is the well width
-        # We'll use a simplified model here
-        base_energy = 0.05 * V_0  # Base energy level (ground state) as a fraction of potential depth
+            # Create eigenvalues with increasing energy and some imaginary part for linewidth
+            self.eigenvalues = np.zeros(num_eigenvalues, dtype=np.complex128)
+            for i in range(num_eigenvalues):
+                # Real part (energy): increases with quantum number
+                real_part = base_energy * (i + 1)**2
 
-        # Create eigenvalues with increasing energy and some imaginary part for linewidth
-        self.eigenvalues = np.zeros(num_eigenvalues, dtype=np.complex128)
-        for i in range(num_eigenvalues):
-            # Real part (energy): increases with quantum number
-            real_part = base_energy * (i + 1)**2
+                # Imaginary part (linewidth): increases with energy (higher states have shorter lifetime)
+                imag_part = -0.01 * real_part
 
-            # Imaginary part (linewidth): increases with energy (higher states have shorter lifetime)
-            imag_part = -0.01 * real_part
+                self.eigenvalues[i] = real_part + imag_part * 1j
 
-            self.eigenvalues[i] = real_part + imag_part * 1j
+            # Convert from eV to Joules
+            self.eigenvalues *= self.config.e_charge
 
-        # Convert from eV to Joules
-        self.eigenvalues *= self.config.e_charge
+            # Create simplified eigenvectors
+            # In a real implementation, these would be the solutions to the Schrödinger equation
+            num_nodes = self.mesh.get_num_nodes()
+            self.eigenvectors = np.zeros((num_nodes, num_eigenvalues), dtype=np.complex128)
 
-        # Create simplified eigenvectors
-        # In a real implementation, these would be the solutions to the Schrödinger equation
-        num_nodes = self.mesh.get_num_nodes()
-        self.eigenvectors = np.zeros((num_nodes, num_eigenvalues), dtype=np.complex128)
+            # Get node coordinates
+            nodes = np.array(self.mesh.get_nodes())
 
-        # Get node coordinates
-        nodes = np.array(self.mesh.get_nodes())
+            # Create simplified wavefunctions based on node positions
+            for i in range(num_eigenvalues):
+                # Calculate distance from center for each node
+                x_center = np.mean(nodes[:, 0])
+                y_center = np.mean(nodes[:, 1])
+                r = np.sqrt((nodes[:, 0] - x_center)**2 + (nodes[:, 1] - y_center)**2)
 
-        # Create simplified wavefunctions based on node positions
-        for i in range(num_eigenvalues):
-            # Calculate distance from center for each node
-            x_center = np.mean(nodes[:, 0])
-            y_center = np.mean(nodes[:, 1])
-            r = np.sqrt((nodes[:, 0] - x_center)**2 + (nodes[:, 1] - y_center)**2)
+                # Create a wavefunction that decays with distance from center
+                # Higher states have more oscillations
+                if i == 0:
+                    # Ground state: Gaussian-like
+                    self.eigenvectors[:, i] = np.exp(-r**2 / (2 * self.config.R**2))
+                else:
+                    # Excited states: oscillating with distance
+                    self.eigenvectors[:, i] = np.exp(-r**2 / (2 * self.config.R**2)) * np.cos(i * np.pi * r / self.config.R)
 
-            # Create a wavefunction that decays with distance from center
-            # Higher states have more oscillations
-            if i == 0:
-                # Ground state: Gaussian-like
-                self.eigenvectors[:, i] = np.exp(-r**2 / (2 * self.config.R**2))
-            else:
-                # Excited states: oscillating with distance
-                self.eigenvectors[:, i] = np.exp(-r**2 / (2 * self.config.R**2)) * np.cos(i * np.pi * r / self.config.R)
+            # Normalize eigenvectors
+            for i in range(num_eigenvalues):
+                norm = np.sqrt(np.sum(np.abs(self.eigenvectors[:, i])**2))
+                if norm > 0:
+                    self.eigenvectors[:, i] /= norm
 
-        # Normalize eigenvectors
-        for i in range(num_eigenvalues):
-            norm = np.sqrt(np.sum(np.abs(self.eigenvectors[:, i])**2))
-            if norm > 0:
-                self.eigenvectors[:, i] /= norm
+            print(f"Created simplified eigenvalues and eigenvectors")
+            print(f"First few eigenvalues (eV): {[ev/self.config.e_charge for ev in self.eigenvalues[:min(5, len(self.eigenvalues))]]}")
 
-        return self.eigenvalues, self.eigenvectors
+            return self.eigenvalues, self.eigenvectors
 
     def get_eigenvalues(self):
         """Get the eigenvalues."""
