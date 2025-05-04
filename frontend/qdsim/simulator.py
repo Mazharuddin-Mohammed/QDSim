@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib.pyplot as plt
 from .config import Config
 from .fe_interpolator import FEInterpolator
 from .adaptive_mesh import AdaptiveMesh
@@ -347,6 +348,56 @@ class Simulator:
     def get_eigenvectors(self):
         """Get the eigenvectors."""
         return self.eigenvectors
+
+    def plot_wavefunction(self, ax, state_idx=0):
+        """
+        Plot a wavefunction on the given axis.
+
+        Args:
+            ax: Matplotlib axis
+            state_idx: Index of the state to plot (default: 0 for ground state)
+        """
+        if self.eigenvectors is None or state_idx >= self.eigenvectors.shape[1]:
+            print(f"Warning: No eigenvector available for state {state_idx}")
+            return
+
+        # Get the wavefunction
+        wavefunction = self.eigenvectors[:, state_idx]
+
+        # Calculate probability density
+        probability = np.abs(wavefunction)**2
+
+        # Get node coordinates
+        nodes = np.array(self.mesh.get_nodes())
+        x = nodes[:, 0]
+        y = nodes[:, 1]
+
+        # Create a triangulation for the plot
+        from matplotlib.tri import Triangulation
+        elements = np.array(self.mesh.get_elements())
+        triangulation = Triangulation(x, y, elements)
+
+        # Plot the probability density
+        contour = ax.tricontourf(triangulation, probability, 50, cmap='viridis')
+        ax.set_xlabel('x (nm)')
+        ax.set_ylabel('y (nm)')
+        ax.set_title(f'Wavefunction Probability Density (State {state_idx})')
+
+        # Add a colorbar
+        plt.colorbar(contour, ax=ax)
+
+        return contour
+
+    def plot_probability_density(self, ax, state_idx=0):
+        """
+        Plot the probability density of a wavefunction on the given axis.
+        This is an alias for plot_wavefunction for backward compatibility.
+
+        Args:
+            ax: Matplotlib axis
+            state_idx: Index of the state to plot (default: 0 for ground state)
+        """
+        return self.plot_wavefunction(ax, state_idx)
 
     def interpolate(self, x, y, field):
         """
