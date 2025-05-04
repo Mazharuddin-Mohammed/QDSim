@@ -36,8 +36,8 @@
  * @param use_mpi Whether to use MPI for parallel computations
  */
 FEMSolver::FEMSolver(Mesh& mesh, double (*m_star)(double, double), double (*V)(double, double),
-                     double (*cap)(double, double), PoissonSolver& poisson, int order, bool use_mpi)
-    : mesh(mesh), poisson(poisson), m_star(m_star), V(V), cap(cap), order(order), use_mpi(use_mpi) {
+                     double (*cap)(double, double), SelfConsistentSolver& sc_solver, int order, bool use_mpi)
+    : mesh(mesh), sc_solver(sc_solver), m_star(m_star), V(V), cap(cap), order(order), use_mpi(use_mpi) {
     // Initialize matrices with the correct size
     H.resize(mesh.getNumNodes(), mesh.getNumNodes());
     M.resize(mesh.getNumNodes(), mesh.getNumNodes());

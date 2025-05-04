@@ -23,6 +23,7 @@
  */
 
 #include "mesh.h"
+#include "self_consistent.h"
 #include "poisson.h"
 #include "fe_interpolator.h"
 #include <Eigen/Sparse>
@@ -53,14 +54,14 @@ public:
      * @param m_star Function that returns the effective mass at a given position
      * @param V Function that returns the potential at a given position
      * @param cap Function that returns the capacitance at a given position
-     * @param poisson The Poisson solver to use for electrostatic calculations
+     * @param sc_solver The self-consistent solver to use for electrostatic calculations
      * @param order The order of the finite elements (1 for P1, 2 for P2, 3 for P3)
      * @param use_mpi Whether to use MPI for parallel computations
      *
      * @throws std::invalid_argument If the input parameters are invalid
      */
     FEMSolver(Mesh& mesh, double (*m_star)(double, double), double (*V)(double, double),
-              double (*cap)(double, double), PoissonSolver& poisson, int order, bool use_mpi = true);
+              double (*cap)(double, double), SelfConsistentSolver& sc_solver, int order, bool use_mpi = false);
     /**
      * @brief Destroys the FEMSolver object.
      */
@@ -124,8 +125,8 @@ private:
     Mesh& mesh;
 
     /** @brief Reference to the Poisson solver used for electrostatic calculations */
-    PoissonSolver& poisson;
-
+    // PoissonSolver& poisson;
+    SelfConsistentSolver& sc_solver;
     /** @brief Hamiltonian matrix (sparse complex matrix) */
     Eigen::SparseMatrix<std::complex<double>> H;
 
