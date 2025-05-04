@@ -56,10 +56,19 @@ class Simulator:
 
             # Create the FEInterpolator
             try:
-                self.interpolator = FEInterpolator(self.mesh, use_cpp=True)
+                # Try to use the C++ FEInterpolator directly
+                self.interpolator = qdsim_cpp.FEInterpolator(self.mesh)
+                print("Using C++ FEInterpolator directly")
             except Exception as e:
-                print(f"Warning: Failed to create C++ FEInterpolator: {e}, falling back to Python implementation")
-                self.interpolator = FEInterpolator(self.mesh, use_cpp=False)
+                print(f"Warning: Failed to create C++ FEInterpolator directly: {e}")
+                try:
+                    # Fall back to the Python wrapper
+                    self.interpolator = FEInterpolator(self.mesh, use_cpp=True)
+                    print("Using Python wrapper for C++ FEInterpolator")
+                except Exception as e:
+                    print(f"Warning: Failed to create C++ FEInterpolator via wrapper: {e}, falling back to Python implementation")
+                    self.interpolator = FEInterpolator(self.mesh, use_cpp=False)
+                    print("Using pure Python FEInterpolator")
 
             # Create the AdaptiveMesh
             try:
@@ -187,11 +196,60 @@ class Simulator:
         return qdsim_cpp.effective_mass(x, y, qd_mat, matrix_mat, self.config.R)
 
     def potential(self, x, y):
-        qd_mat = self.db.get_material(self.config.qd_material)
-        matrix_mat = self.db.get_material(self.config.matrix_material)
-        # Use the potential function with the interpolator if available
-        return qdsim_cpp.potential(x, y, qd_mat, matrix_mat, self.config.R,
-                               self.config.potential_type, self.phi, self.interpolator)
+        """
+        Calculate the potential at a given position.
+
+        Args:
+            x: x-coordinate
+            y: y-coordinate
+
+        Returns:
+            Potential at (x, y)
+        """
+        try:
+            qd_mat = self.db.get_material(self.config.qd_material)
+            matrix_mat = self.db.get_material(self.config.matrix_material)
+
+            # Convert phi to Eigen::VectorXd if needed
+            if isinstance(self.phi, np.ndarray):
+                phi_list = self.phi.tolist()
+            else:
+                phi_list = self.phi
+
+            # Use the potential function with the interpolator if available
+            try:
+                # Try to use the C++ potential function directly
+                return qdsim_cpp.potential(x, y, qd_mat, matrix_mat, self.config.R,
+                                      self.config.potential_type, phi_list, self.interpolator)
+            except Exception as e:
+                print(f"Warning: Failed to use C++ potential function: {e}")
+                # Fall back to interpolating the potential directly
+                try:
+                    # Try to use the interpolator directly
+                    return self.interpolator.interpolate(x, y, phi_list)
+                except Exception as e:
+                    print(f"Warning: Failed to interpolate potential: {e}")
+                    # Fall back to a simplified approach
+                    # Calculate distance from center
+                    junction_x = getattr(self.config, 'junction_position', 0.0)
+                    r = np.sqrt((x - junction_x)**2 + y**2)  # Distance from junction center
+
+                    # Check if potential_type is defined
+                    potential_type = getattr(self.config, 'potential_type', 'gaussian')
+
+                    # Check if V_0 and R are defined
+                    V_0 = getattr(self.config, 'V_0', 0.0)
+                    R = getattr(self.config, 'R', 10.0)
+
+                    if potential_type == "square":
+                        qd_potential = -V_0 if r <= R else 0.0
+                    else:  # gaussian
+                        qd_potential = -V_0 * np.exp(-r**2 / (2 * R**2))
+
+                    return qd_potential
+        except Exception as e:
+            print(f"Warning: Error in potential: {e}")
+            return 0.0  # Default value
 
     def epsilon_r(self, x, y):
         """
