@@ -88,6 +88,9 @@ data/meshes/
 !package-lock.json
 !CMakeLists.txt
 !README*.txt
+!config_samples/*.json
+!config_samples/*.yaml
+!config_samples/*.yml
 
 # Output files
 *.png

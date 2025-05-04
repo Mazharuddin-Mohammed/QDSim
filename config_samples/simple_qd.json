@@ -1,0 +1,20 @@
+{
+    "lx": 200,
+    "ly": 100,
+    "nx": 101,
+    "ny": 51,
+    "element_order": 1,
+    "qd_material": "InAs",
+    "matrix_material": "GaAs",
+    "diode_p_material": "GaAs",
+    "diode_n_material": "GaAs",
+    "r": 10,
+    "v_0": 0.5,
+    "potential_type": "gaussian",
+    "n_a": 1e24,
+    "n_d": 1e24,
+    "v_r": 0.0,
+    "tolerance": 1e-6,
+    "max_iter": 100,
+    "use_mpi": false
+}

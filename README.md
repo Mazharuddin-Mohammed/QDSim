@@ -288,11 +288,98 @@ pip install pybind11 numpy matplotlib pyside6 pytest
 
 ## Run Instructions
 
+### Basic Run
+
 ```bash
 python run_simulator.py
 ```
 
 This will run the simulator and save the results to `energy_shift.png`.
+
+### Command-line Interface
+
+QDSim now provides a comprehensive command-line interface for running simulations:
+
+```bash
+./qdsim_cli.py --lx 200 --ly 100 --nx 101 --ny 51 --qd-radius 10 --potential-depth 0.5 --potential-type gaussian --num-states 5 --save-plots --analyze
+```
+
+You can also use a configuration file:
+
+```bash
+./qdsim_cli.py --config config_samples/simple_qd.yaml --save-plots --analyze
+```
+
+For batch processing (parameter sweeps):
+
+```bash
+./qdsim_cli.py --batch config_samples/batch_qd.yaml --save-plots --analyze
+```
+
+Run `./qdsim_cli.py --help` for a complete list of options.
+
+### Configuration Files
+
+QDSim supports both JSON and YAML configuration files. Here's an example YAML configuration:
+
+```yaml
+# Domain size in nm
+lx: 200
+ly: 100
+
+# Mesh parameters
+nx: 101
+ny: 51
+element_order: 1
+
+# Materials
+qd_material: InAs
+matrix_material: GaAs
+diode_p_material: GaAs
+diode_n_material: GaAs
+
+# Quantum dot parameters
+r: 10  # radius in nm
+v_0: 0.5  # potential depth in eV
+potential_type: gaussian
+
+# Diode parameters
+n_a: 1.0e+24  # acceptor concentration in m^-3
+n_d: 1.0e+24  # donor concentration in m^-3
+v_r: 0.0  # reverse bias in V
+
+# Solver parameters
+tolerance: 1.0e-6
+max_iter: 100
+use_mpi: false
+```
+
+### Batch Processing
+
+For parameter sweeps, you can use a batch configuration file:
+
+```yaml
+base_config:
+  # Base configuration parameters
+  lx: 200
+  ly: 100
+  # ...
+
+parameter_sweeps:
+  - name: QD Radius Sweep
+    parameter: r
+    values: [5, 7.5, 10, 12.5, 15]
+
+  - name: Potential Depth Sweep
+    parameter: v_0
+    values: [0.1, 0.2, 0.3, 0.4, 0.5]
+
+  - name: Reverse Bias Sweep
+    parameter: v_r
+    values: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]
+```
+
+This will run multiple simulations with different parameter values and generate plots showing how the energy levels change with each parameter.
 
 ## Method Name Consistency
 
