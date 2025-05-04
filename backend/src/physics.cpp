@@ -77,15 +77,17 @@ double potential(double x, double y, const Materials::Material& qd_mat,
     double V_qd_eV = 0.0;
     if (type == "square") {
         if (x * x + y * y <= R * R) {
-            V_qd_eV = 0.0;
+            // Inside the quantum dot - use negative potential (well)
+            V_qd_eV = -std::min(qd_mat.Delta_E_c, max_potential_eV);
         } else {
-            // Ensure potential is within realistic range
-            V_qd_eV = std::min(qd_mat.Delta_E_c, max_potential_eV);
+            // Outside the quantum dot - zero potential
+            V_qd_eV = 0.0;
         }
     } else if (type == "gaussian") {
-        // Ensure potential is within realistic range
+        // Gaussian well with smooth boundaries
+        // Negative sign for well (attractive potential)
         double max_depth = std::min(qd_mat.Delta_E_c, max_potential_eV);
-        V_qd_eV = max_depth * std::exp(-(x * x + y * y) / (2 * R * R));
+        V_qd_eV = -max_depth * std::exp(-(x * x + y * y) / (2 * R * R));
     }
 
     // Convert QD potential from eV to J
@@ -94,17 +96,31 @@ double potential(double x, double y, const Materials::Material& qd_mat,
     // Interpolate electrostatic potential at (x,y) using finite element interpolation
     double V_elec_eV = 0.0;
     if (phi.size() > 0 && interpolator != nullptr) {
-        // Use the FEInterpolator to get the potential at (x,y)
-        double V_elec_interp = interpolator->interpolate(x, y, phi);
+        try {
+            // Use the FEInterpolator to get the potential at (x,y)
+            double V_elec_interp = interpolator->interpolate(x, y, phi);
 
-        // Limit the electrostatic potential to a realistic range
-        V_elec_eV = std::min(std::abs(V_elec_interp), max_potential_eV) * (V_elec_interp >= 0 ? 1 : -1);
+            // Convert from V to eV (multiply by elementary charge)
+            V_elec_eV = V_elec_interp;
+
+            // Limit the electrostatic potential to a realistic range
+            if (std::abs(V_elec_eV) > max_potential_eV) {
+                V_elec_eV = max_potential_eV * (V_elec_eV >= 0 ? 1 : -1);
+            }
+        } catch (const std::exception& e) {
+            // If interpolation fails, use a fallback approach
+            if (phi.size() > 0) {
+                // Use the first value as a fallback (not ideal but better than crashing)
+                V_elec_eV = std::min(std::abs(phi[0]), max_potential_eV) * (phi[0] >= 0 ? 1 : -1);
+            }
+        }
     } else if (phi.size() > 0) {
         // Fallback to simple approach if interpolator is not available
         V_elec_eV = std::min(std::abs(phi[0]), max_potential_eV) * (phi[0] >= 0 ? 1 : -1);
     }
     double V_elec = V_elec_eV * e_charge;
 
+    // Return the combined potential (QD + electrostatic)
     return V_qd + V_elec;
 }
 
@@ -147,6 +163,7 @@ double epsilon_r(double x, double y, const Materials::Material& p_mat,
  * @param W_d The total depletion width in nanometers (nm)
  * @return The charge density at the given position in coulombs per cubic nanometer (C/nm^3)
  */
+/*
 double charge_density(double x, double y, double N_A, double N_D, double W_d) {
     const double q = 1.602e-19; // Elementary charge in coulombs (C)
 
@@ -162,6 +179,47 @@ double charge_density(double x, double y, double N_A, double N_D, double W_d) {
 
     // Outside the depletion region, the charge density is zero
     return 0.0;
+}
+*/
+double charge_density(double x, double y, const Eigen::VectorXd& n, const Eigen::VectorXd& p,
+                       const FEInterpolator* n_interpolator, const FEInterpolator* p_interpolator) {
+    const double q = 1.602e-19; // Elementary charge in coulombs (C)
+
+    double n_val = 0.0;
+    double p_val = 0.0;
+
+    // Interpolate electron concentration if interpolator is available
+    if (n.size() > 0 && n_interpolator != nullptr) {
+        try {
+            n_val = n_interpolator->interpolate(x, y, n);
+        } catch (const std::exception& e) {
+            // If interpolation fails, use the first value as a fallback
+            if (n.size() > 0) {
+                n_val = n[0];
+            }
+        }
+    } else if (n.size() > 0) {
+        // Fallback to first value if interpolator is not available
+        n_val = n[0];
+    }
+
+    // Interpolate hole concentration if interpolator is available
+    if (p.size() > 0 && p_interpolator != nullptr) {
+        try {
+            p_val = p_interpolator->interpolate(x, y, p);
+        } catch (const std::exception& e) {
+            // If interpolation fails, use the first value as a fallback
+            if (p.size() > 0) {
+                p_val = p[0];
+            }
+        }
+    } else if (p.size() > 0) {
+        // Fallback to first value if interpolator is not available
+        p_val = p[0];
+    }
+
+    // Return the charge density (p - n) * q
+    return q * (p_val - n_val);
 }
 
 /**
@@ -193,6 +251,28 @@ double cap(double x, double y, double eta, double Lx, double Ly, double d) {
 
     // Return the maximum of the two contributions
     return std::max(eta_x, eta_y);
+}
+
+double electron_concentration(double x, double y, double phi, const Materials::Material& mat) {
+    const double kT = 0.0259; // eV at 300K
+    const double q = 1.602e-19; // Elementary charge in C
+    double E_F = 0.0; // Simplified; assume constant Fermi level
+    return mat.N_c * std::exp((-q * phi - E_F) / kT);
+}
+
+double hole_concentration(double x, double y, double phi, const Materials::Material& mat) {
+    const double kT = 0.0259; // eV at 300K
+    const double q = 1.602e-19; // Elementary charge in C
+    double E_F = 0.0; // Simplified; assume constant Fermi level
+    return mat.N_v * std::exp((q * phi + mat.E_g - E_F) / kT);
+}
+
+double mobility_n(double x, double y, const Materials::Material& mat) {
+    return mat.mu_n;
+}
+
+double mobility_p(double x, double y, const Materials::Material& mat) {
+    return mat.mu_p;
 }
 
 } // namespace Physics

@@ -58,6 +58,17 @@ struct Material {
 
     /** @brief Dielectric constant relative to vacuum permittivity (epsilon_0) */
     double epsilon_r;
+
+    /** @brief Valence band offset in electron volts (eV) */
+    // double Delta_E_v;
+
+    /** @brief Dielectric constant relative to vacuum permittivity (epsilon_0) */
+    // double epsilon_0;
+
+    double mu_n;      // Electron mobility (m^2/V·s)
+    double mu_p;      // Hole mobility (m^2/V·s)
+    double N_c;       // Effective density of states, conduction band (m^-3)
+    double N_v;       // Effective density of states, valence band (m^-3)
 };
 
 /**
