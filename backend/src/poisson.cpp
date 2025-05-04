@@ -27,9 +27,9 @@
  * @param epsilon_r Function that returns the relative permittivity at a given position
  * @param rho Function that returns the charge density at a given position
  */
-PoissonSolver::PoissonSolver(Mesh& mesh, double (*epsilon_r)(double, double), double (*rho)(double, double))
+PoissonSolver::PoissonSolver(Mesh& mesh, double (*epsilon_r)(double, double),
+                             double (*rho)(double, double, const Eigen::VectorXd&, const Eigen::VectorXd&))
     : mesh(mesh), epsilon_r(epsilon_r), rho(rho) {
-    // Initialize matrices and vectors with the correct size
     K.resize(mesh.getNumNodes(), mesh.getNumNodes());
     phi.resize(mesh.getNumNodes());
     f.resize(mesh.getNumNodes());
@@ -106,7 +106,7 @@ void PoissonSolver::assemble_matrix() {
  *
  * @throws std::runtime_error If the assembly fails
  */
-void PoissonSolver::assemble_rhs() {
+void PoissonSolver::assemble_rhs(const Eigen::VectorXd& n, const Eigen::VectorXd& p) {
     // Initialize the right-hand side vector to zero
     f.setZero();
 
@@ -125,7 +125,7 @@ void PoissonSolver::assemble_rhs() {
             double x = 0.0, y = 0.0;
 
             // Get the charge density at this point
-            double charge = rho(x, y);
+            double charge = rho(x, y, n, p);
 
             // Add the element vector entries to the global vector
             for (int i = 0; i < 3; ++i) {
@@ -209,12 +209,12 @@ void PoissonSolver::apply_boundary_conditions(double V_p, double V_n) {
  *
  * @throws std::runtime_error If the solver fails to converge
  */
-void PoissonSolver::solve(double V_p, double V_n) {
+void PoissonSolver::solve(double V_p, double V_n, const Eigen::VectorXd& n, const Eigen::VectorXd& p) {
     // Assemble the stiffness matrix
     assemble_matrix();
 
     // Assemble the right-hand side vector
-    assemble_rhs();
+    assemble_rhs(n, p);
 
     // Apply boundary conditions
     apply_boundary_conditions(V_p, V_n);

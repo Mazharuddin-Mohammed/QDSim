@@ -58,7 +58,8 @@ public:
      *
      * @throws std::invalid_argument If the input parameters are invalid
      */
-    PoissonSolver(Mesh& mesh, double (*epsilon_r)(double, double), double (*rho)(double, double));
+    PoissonSolver(Mesh& mesh, double (*epsilon_r)(double, double), 
+                  double (*rho)(double, double, const Eigen::VectorXd&, const Eigen::VectorXd&));
     /**
      * @brief Solves the Poisson equation.
      *
@@ -71,7 +72,7 @@ public:
      *
      * @throws std::runtime_error If the solver fails to converge
      */
-    void solve(double V_p, double V_n);
+    void solve(double V_p, double V_n, const Eigen::VectorXd& n, const Eigen::VectorXd& p);
 
     /**
      * @brief Gets the computed electrostatic potential.
@@ -113,7 +114,7 @@ private:
     double (*epsilon_r)(double, double);
 
     /** @brief Function that returns the charge density at a given position */
-    double (*rho)(double, double);
+    double (*rho)(double, double, const Eigen::VectorXd&, const Eigen::VectorXd&);
 
     /**
      * @brief Assembles the stiffness matrix.
@@ -129,7 +130,7 @@ private:
      * This private method assembles the right-hand side vector for the Poisson equation
      * using the finite element method.
      */
-    void assemble_rhs();
+    void assemble_rhs(const Eigen::VectorXd& n, const Eigen::VectorXd& p);
 
     /**
      * @brief Applies boundary conditions.
