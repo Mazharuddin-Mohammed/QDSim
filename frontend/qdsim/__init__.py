@@ -33,4 +33,26 @@ except ImportError as e:
 from .config import Config
 from .simulator import Simulator
 from .visualization import plot_wavefunction, plot_electric_field, plot_potential, plot_energy_shift
-from .interactive_viz import show_interactive_visualization, InteractiveVisualizer
+from .interactive_viz import show_interactive_visualization
+from .enhanced_visualization import (
+    plot_enhanced_wavefunction_3d,
+    plot_enhanced_potential_3d,
+    plot_combined_visualization,
+    create_energy_level_diagram,
+    calculate_transition_probabilities,
+    plot_transition_matrix
+)
+from .interactive_controls import show_enhanced_visualization
+from .result_analysis import (
+    extract_energy_levels,
+    calculate_energy_spacing,
+    calculate_transition_matrix,
+    calculate_dipole_matrix,
+    calculate_oscillator_strengths,
+    analyze_wavefunction_localization,
+    fit_energy_levels,
+    create_energy_level_report,
+    create_transition_probability_report,
+    create_wavefunction_localization_report,
+    export_results_to_csv
+)

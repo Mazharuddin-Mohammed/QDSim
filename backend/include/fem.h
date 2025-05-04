@@ -26,7 +26,15 @@
 #include "self_consistent.h"
 #include "poisson.h"
 #include "fe_interpolator.h"
+#include "error_estimator.h"
+#include "mesh_quality.h"
+#include "adaptive_refinement.h"
 #include <Eigen/Sparse>
+#include <Eigen/Dense>
+#include <complex>
+#include <vector>
+#include <string>
+#include <functional>
 #ifdef USE_MPI
 #include <mpi.h>
 #endif
@@ -62,6 +70,29 @@ public:
      */
     FEMSolver(Mesh& mesh, double (*m_star)(double, double), double (*V)(double, double),
               double (*cap)(double, double), SelfConsistentSolver& sc_solver, int order, bool use_mpi = false);
+
+    /**
+     * @brief Sets the potential values at mesh nodes for interpolation.
+     *
+     * This method sets the potential values at mesh nodes for proper finite element
+     * interpolation. The potential values are used in the assemble_element_matrix method.
+     *
+     * @param potential_values The potential values at mesh nodes
+     *
+     * @throws std::invalid_argument If the potential_values vector has an invalid size
+     */
+    void set_potential_values(const Eigen::VectorXd& potential_values);
+
+    /**
+     * @brief Enables or disables the use of interpolated potentials.
+     *
+     * When enabled, the solver will use finite element interpolation for potentials
+     * instead of calling the V function directly. This provides more accurate results,
+     * especially for higher-order elements.
+     *
+     * @param enable Whether to enable interpolated potentials
+     */
+    void use_interpolated_potential(bool enable);
     /**
      * @brief Destroys the FEMSolver object.
      */
@@ -150,6 +181,12 @@ private:
 
     /** @brief Finite element interpolator for field interpolation */
     FEInterpolator* interpolator;
+
+    /** @brief Potential values at mesh nodes for interpolation */
+    Eigen::VectorXd potential_values;
+
+    /** @brief Flag to enable/disable interpolated potentials */
+    bool use_interpolation;
 
     /**
      * @brief Assembles the element matrices for a single element.

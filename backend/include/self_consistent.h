@@ -87,11 +87,19 @@ public:
      */
     Eigen::Vector2d get_electric_field(double x, double y) const { return poisson.get_electric_field(x, y); }
 
+public:
+    // Convergence acceleration parameters
+    double damping_factor;               ///< Damping factor for potential updates (0 < damping_factor <= 1)
+    int anderson_history_size;           ///< Number of previous iterations to use for Anderson acceleration
+
 private:
     Mesh& mesh;                          ///< Reference to the mesh used for the simulation
     PoissonSolver poisson;               ///< Poisson solver for the electrostatic potential
     Eigen::VectorXd n, p;                ///< Carrier concentrations (electrons and holes)
     Eigen::SparseMatrix<double> Kn, Kp;  ///< Drift-diffusion matrices for electrons and holes
+
+    std::vector<Eigen::VectorXd> phi_history;  ///< History of potential vectors for Anderson acceleration
+    std::vector<Eigen::VectorXd> res_history;  ///< History of residual vectors for Anderson acceleration
 
     // Function pointers for physical quantities
     double (*epsilon_r)(double, double);  ///< Function for relative permittivity
@@ -100,6 +108,31 @@ private:
     double (*p_conc)(double, double, double, const Materials::Material&);  ///< Function for hole concentration
     double (*mu_n)(double, double, const Materials::Material&);  ///< Function for electron mobility
     double (*mu_p)(double, double, const Materials::Material&);  ///< Function for hole mobility
+
+    /**
+     * @brief Apply damping to the potential update.
+     *
+     * This method applies damping to the potential update to improve convergence.
+     * It uses a simple linear damping scheme: phi_new = phi_old + damping_factor * (phi_update - phi_old)
+     *
+     * @param phi_old The previous potential vector
+     * @param phi_update The updated potential vector
+     * @return The damped potential vector
+     */
+    Eigen::VectorXd apply_damping(const Eigen::VectorXd& phi_old, const Eigen::VectorXd& phi_update) const;
+
+    /**
+     * @brief Apply Anderson acceleration to the potential update.
+     *
+     * This method applies Anderson acceleration to the potential update to improve convergence.
+     * It uses the history of potential and residual vectors to compute an optimal combination
+     * of previous iterations.
+     *
+     * @param phi_old The previous potential vector
+     * @param phi_update The updated potential vector
+     * @return The accelerated potential vector
+     */
+    Eigen::VectorXd apply_anderson_acceleration(const Eigen::VectorXd& phi_old, const Eigen::VectorXd& phi_update);
 
     /**
      * @brief Initializes the carrier concentrations based on the doping concentrations.

@@ -36,105 +36,415 @@
 #include <pybind11/functional.h>
 #include <iostream>
 #include <memory>
+#include <mutex>
+#include <sstream>
+#include <unordered_map>
 
-// Global Python callback functions for SelfConsistentSolver
-// We use shared_ptr to ensure proper reference counting
-std::shared_ptr<pybind11::function> g_epsilon_r_py;
-std::shared_ptr<pybind11::function> g_rho_py;
-std::shared_ptr<pybind11::function> g_n_conc_py;
-std::shared_ptr<pybind11::function> g_p_conc_py;
-std::shared_ptr<pybind11::function> g_mu_n_py;
-std::shared_ptr<pybind11::function> g_mu_p_py;
+/**
+ * @brief Callback manager for Python callbacks.
+ *
+ * This class manages Python callbacks used by C++ code. It ensures proper
+ * reference counting and cleanup of Python callbacks when they are no longer needed.
+ * It also provides thread-safe access to the callbacks.
+ */
+class CallbackManager {
+public:
+    /**
+     * @brief Get the singleton instance of the callback manager.
+     *
+     * @return CallbackManager& The singleton instance.
+     */
+    static CallbackManager& getInstance() {
+        static CallbackManager instance;
+        return instance;
+    }
+
+    /**
+     * @brief Set a Python callback function.
+     *
+     * @param name The name of the callback.
+     * @param callback The Python callback function.
+     */
+    void setCallback(const std::string& name, const pybind11::function& callback) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        callbacks_[name] = std::make_shared<pybind11::function>(callback);
+    }
+
+    /**
+     * @brief Get a Python callback function.
+     *
+     * @param name The name of the callback.
+     * @return std::shared_ptr<pybind11::function> The Python callback function.
+     */
+    std::shared_ptr<pybind11::function> getCallback(const std::string& name) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = callbacks_.find(name);
+        if (it != callbacks_.end()) {
+            return it->second;
+        }
+        return nullptr;
+    }
+
+    /**
+     * @brief Clear all Python callback functions.
+     */
+    void clearCallbacks() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        callbacks_.clear();
+    }
+
+    /**
+     * @brief Clear a specific Python callback function.
+     *
+     * @param name The name of the callback to clear.
+     */
+    void clearCallback(const std::string& name) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = callbacks_.find(name);
+        if (it != callbacks_.end()) {
+            callbacks_.erase(it);
+        }
+    }
+
+private:
+    CallbackManager() = default;
+    ~CallbackManager() = default;
+    CallbackManager(const CallbackManager&) = delete;
+    CallbackManager& operator=(const CallbackManager&) = delete;
+
+    std::mutex mutex_;
+    std::unordered_map<std::string, std::shared_ptr<pybind11::function>> callbacks_;
+};
+
+// Convenience functions to access the callback manager
+void setCallback(const std::string& name, const pybind11::function& callback) {
+    CallbackManager::getInstance().setCallback(name, callback);
+}
+
+std::shared_ptr<pybind11::function> getCallback(const std::string& name) {
+    return CallbackManager::getInstance().getCallback(name);
+}
+
+void clearCallbacks() {
+    CallbackManager::getInstance().clearCallbacks();
+}
+
+void clearCallback(const std::string& name) {
+    CallbackManager::getInstance().clearCallback(name);
+}
+
+/**
+ * @brief Exception class for callback errors.
+ *
+ * This class represents an exception that is thrown when a callback error occurs.
+ * It provides detailed information about the error, including the callback name,
+ * the position where the error occurred, and the error message.
+ */
+class CallbackException : public std::runtime_error {
+public:
+    /**
+     * @brief Construct a new Callback Exception object.
+     *
+     * @param callback_name The name of the callback where the error occurred.
+     * @param x The x-coordinate where the error occurred.
+     * @param y The y-coordinate where the error occurred.
+     * @param message The error message.
+     */
+    CallbackException(const std::string& callback_name, double x, double y, const std::string& message)
+        : std::runtime_error(formatMessage(callback_name, x, y, message)),
+          callback_name_(callback_name), x_(x), y_(y), message_(message) {}
+
+    /**
+     * @brief Get the name of the callback where the error occurred.
+     *
+     * @return const std::string& The callback name.
+     */
+    const std::string& getCallbackName() const { return callback_name_; }
+
+    /**
+     * @brief Get the x-coordinate where the error occurred.
+     *
+     * @return double The x-coordinate.
+     */
+    double getX() const { return x_; }
+
+    /**
+     * @brief Get the y-coordinate where the error occurred.
+     *
+     * @return double The y-coordinate.
+     */
+    double getY() const { return y_; }
+
+    /**
+     * @brief Get the error message.
+     *
+     * @return const std::string& The error message.
+     */
+    const std::string& getMessage() const { return message_; }
+
+private:
+    /**
+     * @brief Format the error message.
+     *
+     * @param callback_name The name of the callback where the error occurred.
+     * @param x The x-coordinate where the error occurred.
+     * @param y The y-coordinate where the error occurred.
+     * @param message The error message.
+     * @return std::string The formatted error message.
+     */
+    static std::string formatMessage(const std::string& callback_name, double x, double y, const std::string& message) {
+        std::ostringstream oss;
+        oss << "Error in " << callback_name << " callback at position (" << x << ", " << y << "): " << message;
+        return oss.str();
+    }
+
+    std::string callback_name_;
+    double x_;
+    double y_;
+    std::string message_;
+};
+
+/**
+ * @brief Log an error message.
+ *
+ * This function logs an error message to the standard error stream.
+ * It includes the callback name, the position where the error occurred,
+ * and the error message.
+ *
+ * @param callback_name The name of the callback where the error occurred.
+ * @param x The x-coordinate where the error occurred.
+ * @param y The y-coordinate where the error occurred.
+ * @param message The error message.
+ */
+void logError(const std::string& callback_name, double x, double y, const std::string& message) {
+    std::cerr << "Error in " << callback_name << " callback at position (" << x << ", " << y << "): " << message << std::endl;
+}
 
 // C++ wrapper functions that call the Python callbacks
 double epsilon_r_wrapper(double x, double y) {
     pybind11::gil_scoped_acquire gil;
     try {
-        if (g_epsilon_r_py) {
-            return (*g_epsilon_r_py)(x, y).cast<double>();
+        auto callback = getCallback("epsilon_r");
+        if (callback) {
+            try {
+                return (*callback)(x, y).cast<double>();
+            } catch (const pybind11::error_already_set& e) {
+                // Python exception
+                logError("epsilon_r", x, y, std::string("Python exception: ") + e.what());
+                throw CallbackException("epsilon_r", x, y, std::string("Python exception: ") + e.what());
+            } catch (const pybind11::cast_error& e) {
+                // Type conversion error
+                logError("epsilon_r", x, y, std::string("Type conversion error: ") + e.what());
+                throw CallbackException("epsilon_r", x, y, std::string("Type conversion error: ") + e.what());
+            }
         } else {
-            std::cerr << "Error in epsilon_r callback: Python callback is null" << std::endl;
-            return 1.0; // Default value
+            logError("epsilon_r", x, y, "Python callback is null");
+            return 1.0; // Default value for relative permittivity
         }
+    } catch (const CallbackException&) {
+        // Re-throw CallbackException
+        throw;
     } catch (const std::exception& e) {
-        std::cerr << "Error in epsilon_r callback: " << e.what() << std::endl;
-        return 1.0; // Default value
+        // Other C++ exceptions
+        logError("epsilon_r", x, y, std::string("C++ exception: ") + e.what());
+        throw CallbackException("epsilon_r", x, y, std::string("C++ exception: ") + e.what());
+    } catch (...) {
+        // Unknown exceptions
+        logError("epsilon_r", x, y, "Unknown exception");
+        throw CallbackException("epsilon_r", x, y, "Unknown exception");
     }
+
+    // Fallback value if no exception is thrown but we somehow get here
+    return 1.0;
 }
 
 double rho_wrapper(double x, double y, const Eigen::VectorXd& n, const Eigen::VectorXd& p) {
     pybind11::gil_scoped_acquire gil;
     try {
-        if (g_rho_py) {
-            return (*g_rho_py)(x, y, n, p).cast<double>();
+        auto callback = getCallback("rho");
+        if (callback) {
+            try {
+                return (*callback)(x, y, n, p).cast<double>();
+            } catch (const pybind11::error_already_set& e) {
+                // Python exception
+                logError("rho", x, y, std::string("Python exception: ") + e.what());
+                throw CallbackException("rho", x, y, std::string("Python exception: ") + e.what());
+            } catch (const pybind11::cast_error& e) {
+                // Type conversion error
+                logError("rho", x, y, std::string("Type conversion error: ") + e.what());
+                throw CallbackException("rho", x, y, std::string("Type conversion error: ") + e.what());
+            }
         } else {
-            std::cerr << "Error in rho callback: Python callback is null" << std::endl;
-            return 0.0; // Default value
+            logError("rho", x, y, "Python callback is null");
+            return 0.0; // Default value for charge density
         }
+    } catch (const CallbackException&) {
+        // Re-throw CallbackException
+        throw;
     } catch (const std::exception& e) {
-        std::cerr << "Error in rho callback: " << e.what() << std::endl;
-        return 0.0; // Default value
+        // Other C++ exceptions
+        logError("rho", x, y, std::string("C++ exception: ") + e.what());
+        throw CallbackException("rho", x, y, std::string("C++ exception: ") + e.what());
+    } catch (...) {
+        // Unknown exceptions
+        logError("rho", x, y, "Unknown exception");
+        throw CallbackException("rho", x, y, "Unknown exception");
     }
+
+    // Fallback value if no exception is thrown but we somehow get here
+    return 0.0;
 }
 
 double n_conc_wrapper(double x, double y, double phi, const Materials::Material& mat) {
     pybind11::gil_scoped_acquire gil;
     try {
-        if (g_n_conc_py) {
-            return (*g_n_conc_py)(x, y, phi, mat).cast<double>();
+        auto callback = getCallback("n_conc");
+        if (callback) {
+            try {
+                return (*callback)(x, y, phi, mat).cast<double>();
+            } catch (const pybind11::error_already_set& e) {
+                // Python exception
+                logError("n_conc", x, y, std::string("Python exception: ") + e.what());
+                throw CallbackException("n_conc", x, y, std::string("Python exception: ") + e.what());
+            } catch (const pybind11::cast_error& e) {
+                // Type conversion error
+                logError("n_conc", x, y, std::string("Type conversion error: ") + e.what());
+                throw CallbackException("n_conc", x, y, std::string("Type conversion error: ") + e.what());
+            }
         } else {
-            std::cerr << "Error in n_conc callback: Python callback is null" << std::endl;
-            return 1e10; // Default value
+            logError("n_conc", x, y, "Python callback is null");
+            // Use the Physics implementation as a fallback
+            return Physics::electron_concentration(x, y, phi, mat);
         }
+    } catch (const CallbackException&) {
+        // Re-throw CallbackException
+        throw;
     } catch (const std::exception& e) {
-        std::cerr << "Error in n_conc callback: " << e.what() << std::endl;
-        return 1e10; // Default value
+        // Other C++ exceptions
+        logError("n_conc", x, y, std::string("C++ exception: ") + e.what());
+        throw CallbackException("n_conc", x, y, std::string("C++ exception: ") + e.what());
+    } catch (...) {
+        // Unknown exceptions
+        logError("n_conc", x, y, "Unknown exception");
+        throw CallbackException("n_conc", x, y, "Unknown exception");
     }
+
+    // Fallback value if no exception is thrown but we somehow get here
+    return 1e10;
 }
 
 double p_conc_wrapper(double x, double y, double phi, const Materials::Material& mat) {
     pybind11::gil_scoped_acquire gil;
     try {
-        if (g_p_conc_py) {
-            return (*g_p_conc_py)(x, y, phi, mat).cast<double>();
+        auto callback = getCallback("p_conc");
+        if (callback) {
+            try {
+                return (*callback)(x, y, phi, mat).cast<double>();
+            } catch (const pybind11::error_already_set& e) {
+                // Python exception
+                logError("p_conc", x, y, std::string("Python exception: ") + e.what());
+                throw CallbackException("p_conc", x, y, std::string("Python exception: ") + e.what());
+            } catch (const pybind11::cast_error& e) {
+                // Type conversion error
+                logError("p_conc", x, y, std::string("Type conversion error: ") + e.what());
+                throw CallbackException("p_conc", x, y, std::string("Type conversion error: ") + e.what());
+            }
         } else {
-            std::cerr << "Error in p_conc callback: Python callback is null" << std::endl;
-            return 1e10; // Default value
+            logError("p_conc", x, y, "Python callback is null");
+            // Use the Physics implementation as a fallback
+            return Physics::hole_concentration(x, y, phi, mat);
         }
+    } catch (const CallbackException&) {
+        // Re-throw CallbackException
+        throw;
     } catch (const std::exception& e) {
-        std::cerr << "Error in p_conc callback: " << e.what() << std::endl;
-        return 1e10; // Default value
+        // Other C++ exceptions
+        logError("p_conc", x, y, std::string("C++ exception: ") + e.what());
+        throw CallbackException("p_conc", x, y, std::string("C++ exception: ") + e.what());
+    } catch (...) {
+        // Unknown exceptions
+        logError("p_conc", x, y, "Unknown exception");
+        throw CallbackException("p_conc", x, y, "Unknown exception");
     }
+
+    // Fallback value if no exception is thrown but we somehow get here
+    return 1e10;
 }
 
 double mu_n_wrapper(double x, double y, const Materials::Material& mat) {
     pybind11::gil_scoped_acquire gil;
     try {
-        if (g_mu_n_py) {
-            return (*g_mu_n_py)(x, y, mat).cast<double>();
+        auto callback = getCallback("mu_n");
+        if (callback) {
+            try {
+                return (*callback)(x, y, mat).cast<double>();
+            } catch (const pybind11::error_already_set& e) {
+                // Python exception
+                logError("mu_n", x, y, std::string("Python exception: ") + e.what());
+                throw CallbackException("mu_n", x, y, std::string("Python exception: ") + e.what());
+            } catch (const pybind11::cast_error& e) {
+                // Type conversion error
+                logError("mu_n", x, y, std::string("Type conversion error: ") + e.what());
+                throw CallbackException("mu_n", x, y, std::string("Type conversion error: ") + e.what());
+            }
         } else {
-            std::cerr << "Error in mu_n callback: Python callback is null" << std::endl;
-            return 0.1; // Default value
+            logError("mu_n", x, y, "Python callback is null");
+            // Use the Physics implementation as a fallback
+            return Physics::mobility_n(x, y, mat);
         }
+    } catch (const CallbackException&) {
+        // Re-throw CallbackException
+        throw;
     } catch (const std::exception& e) {
-        std::cerr << "Error in mu_n callback: " << e.what() << std::endl;
-        return 0.1; // Default value
+        // Other C++ exceptions
+        logError("mu_n", x, y, std::string("C++ exception: ") + e.what());
+        throw CallbackException("mu_n", x, y, std::string("C++ exception: ") + e.what());
+    } catch (...) {
+        // Unknown exceptions
+        logError("mu_n", x, y, "Unknown exception");
+        throw CallbackException("mu_n", x, y, "Unknown exception");
     }
+
+    // Fallback value if no exception is thrown but we somehow get here
+    return 0.1;
 }
 
 double mu_p_wrapper(double x, double y, const Materials::Material& mat) {
     pybind11::gil_scoped_acquire gil;
     try {
-        if (g_mu_p_py) {
-            return (*g_mu_p_py)(x, y, mat).cast<double>();
+        auto callback = getCallback("mu_p");
+        if (callback) {
+            try {
+                return (*callback)(x, y, mat).cast<double>();
+            } catch (const pybind11::error_already_set& e) {
+                // Python exception
+                logError("mu_p", x, y, std::string("Python exception: ") + e.what());
+                throw CallbackException("mu_p", x, y, std::string("Python exception: ") + e.what());
+            } catch (const pybind11::cast_error& e) {
+                // Type conversion error
+                logError("mu_p", x, y, std::string("Type conversion error: ") + e.what());
+                throw CallbackException("mu_p", x, y, std::string("Type conversion error: ") + e.what());
+            }
         } else {
-            std::cerr << "Error in mu_p callback: Python callback is null" << std::endl;
-            return 0.01; // Default value
+            logError("mu_p", x, y, "Python callback is null");
+            // Use the Physics implementation as a fallback
+            return Physics::mobility_p(x, y, mat);
         }
+    } catch (const CallbackException&) {
+        // Re-throw CallbackException
+        throw;
     } catch (const std::exception& e) {
-        std::cerr << "Error in mu_p callback: " << e.what() << std::endl;
-        return 0.01; // Default value
+        // Other C++ exceptions
+        logError("mu_p", x, y, std::string("C++ exception: ") + e.what());
+        throw CallbackException("mu_p", x, y, std::string("C++ exception: ") + e.what());
+    } catch (...) {
+        // Unknown exceptions
+        logError("mu_p", x, y, "Unknown exception");
+        throw CallbackException("mu_p", x, y, "Unknown exception");
     }
+
+    // Fallback value if no exception is thrown but we somehow get here
+    return 0.01;
 }
 
 /**
@@ -185,17 +495,37 @@ PYBIND11_MODULE(qdsim_cpp, m) {
              pybind11::arg("x"), pybind11::arg("y"),
              "Find the element containing a point (x, y)");
 
+    // Material class for material properties
+    pybind11::class_<Materials::Material>(m, "Material")
+        .def(pybind11::init<>(), "Construct a new Material object with default properties")
+        .def_readwrite("m_e", &Materials::Material::m_e, "Electron effective mass (relative to free electron mass)")
+        .def_readwrite("m_h", &Materials::Material::m_h, "Hole effective mass (relative to free electron mass)")
+        .def_readwrite("E_g", &Materials::Material::E_g, "Band gap energy (eV)")
+        .def_readwrite("Delta_E_c", &Materials::Material::Delta_E_c, "Conduction band offset (eV)")
+        .def_readwrite("epsilon_r", &Materials::Material::epsilon_r, "Relative permittivity")
+        .def_readwrite("mu_n", &Materials::Material::mu_n, "Electron mobility (nm²/V·s)")
+        .def_readwrite("mu_p", &Materials::Material::mu_p, "Hole mobility (nm²/V·s)")
+        .def_readwrite("N_c", &Materials::Material::N_c, "Effective density of states in conduction band (1/nm³)")
+        .def_readwrite("N_v", &Materials::Material::N_v, "Effective density of states in valence band (1/nm³)")
+        .def("__repr__", [](const Materials::Material& mat) {
+            return "<Material: m_e=" + std::to_string(mat.m_e) +
+                   ", m_h=" + std::to_string(mat.m_h) +
+                   ", E_g=" + std::to_string(mat.E_g) +
+                   ", epsilon_r=" + std::to_string(mat.epsilon_r) + ">";
+        });
+
     // MaterialDatabase class for material properties
     pybind11::class_<Materials::MaterialDatabase>(m, "MaterialDatabase")
         .def(pybind11::init<>(),
              "Construct a new MaterialDatabase object with default materials")
-        .def("get_material", [](const Materials::MaterialDatabase& db, const std::string& name) {
-                auto mat = db.get_material(name);
-                return std::make_tuple(mat.m_e, mat.m_h, mat.E_g, mat.Delta_E_c, mat.epsilon_r,
-                                         mat.mu_n, mat.mu_p, mat.N_c, mat.N_v);
-             },
+        .def("get_material", &Materials::MaterialDatabase::get_material,
              pybind11::arg("name"),
-             "Get the properties of a material by name, returns a tuple of (m_e, m_h, E_g, Delta_E_c, epsilon_r, mat.mu_n, mat.mu_p, mat.N_c, mat.N_v)");
+             "Get the properties of a material by name")
+        .def("get_all_materials", &Materials::MaterialDatabase::get_all_materials,
+             "Get a map of all available materials")
+        .def("add_material", &Materials::MaterialDatabase::add_material,
+             pybind11::arg("name"), pybind11::arg("material"),
+             "Add a new material to the database");
 
     // PoissonSolver class for electrostatic calculations
     pybind11::class_<PoissonSolver>(m, "PoissonSolver")
@@ -238,7 +568,15 @@ PYBIND11_MODULE(qdsim_cpp, m) {
                   "Get the computed hole concentration")
              .def("get_electric_field", &SelfConsistentSolver::get_electric_field,
                   pybind11::arg("x"), pybind11::arg("y"),
-                  "Get the electric field at a point (x, y)");
+                  "Get the electric field at a point (x, y)")
+             .def_property("damping_factor",
+                  [](SelfConsistentSolver& solver) { return solver.damping_factor; },
+                  [](SelfConsistentSolver& solver, double value) { solver.damping_factor = value; },
+                  "Damping factor for potential updates (0 < damping_factor <= 1)")
+             .def_property("anderson_history_size",
+                  [](SelfConsistentSolver& solver) { return solver.anderson_history_size; },
+                  [](SelfConsistentSolver& solver, int value) { solver.anderson_history_size = value; },
+                  "Number of previous iterations to use for Anderson acceleration");
 
     // FEMSolver class for quantum simulations
     pybind11::class_<FEMSolver>(m, "FEMSolver")
@@ -258,7 +596,13 @@ PYBIND11_MODULE(qdsim_cpp, m) {
         .def("get_M", [](const FEMSolver& solver) { return solver.get_M(); },
              "Get the mass matrix")
         .def("get_interpolator", [](const FEMSolver& solver) { return solver.get_interpolator(); },
-             "Get the field interpolator");
+             "Get the field interpolator")
+        .def("set_potential_values", &FEMSolver::set_potential_values,
+             pybind11::arg("potential_values"),
+             "Set the potential values at mesh nodes for interpolation")
+        .def("use_interpolated_potential", &FEMSolver::use_interpolated_potential,
+             pybind11::arg("enable"),
+             "Enable or disable the use of interpolated potentials");
 
     // EigenSolver class for eigenvalue problems
     pybind11::class_<EigenSolver>(m, "EigenSolver")
@@ -371,13 +715,13 @@ PYBIND11_MODULE(qdsim_cpp, m) {
      m.def("create_self_consistent_solver", [](Mesh& mesh, pybind11::function epsilon_r_py, pybind11::function rho_py,
                                              pybind11::function n_conc_py, pybind11::function p_conc_py,
                                              pybind11::function mu_n_py, pybind11::function mu_p_py) {
-         // Store the Python callbacks in global variables using shared_ptr
-         g_epsilon_r_py = std::make_shared<pybind11::function>(epsilon_r_py);
-         g_rho_py = std::make_shared<pybind11::function>(rho_py);
-         g_n_conc_py = std::make_shared<pybind11::function>(n_conc_py);
-         g_p_conc_py = std::make_shared<pybind11::function>(p_conc_py);
-         g_mu_n_py = std::make_shared<pybind11::function>(mu_n_py);
-         g_mu_p_py = std::make_shared<pybind11::function>(mu_p_py);
+         // Store the Python callbacks in the callback manager
+         setCallback("epsilon_r", epsilon_r_py);
+         setCallback("rho", rho_py);
+         setCallback("n_conc", n_conc_py);
+         setCallback("p_conc", p_conc_py);
+         setCallback("mu_n", mu_n_py);
+         setCallback("mu_p", mu_p_py);
 
          // Create and return the SelfConsistentSolver with the wrapper functions
          return new SelfConsistentSolver(mesh, epsilon_r_wrapper, rho_wrapper, n_conc_wrapper, p_conc_wrapper, mu_n_wrapper, mu_p_wrapper);
@@ -387,9 +731,9 @@ PYBIND11_MODULE(qdsim_cpp, m) {
 
      // Helper function to create a SimpleSelfConsistentSolver
      m.def("create_simple_self_consistent_solver", [](Mesh& mesh, pybind11::function epsilon_r_py, pybind11::function rho_py) {
-         // Store the Python callbacks in global variables using shared_ptr
-         g_epsilon_r_py = std::make_shared<pybind11::function>(epsilon_r_py);
-         g_rho_py = std::make_shared<pybind11::function>(rho_py);
+         // Store the Python callbacks in the callback manager
+         setCallback("epsilon_r", epsilon_r_py);
+         setCallback("rho", rho_py);
 
          // Create and return the SimpleSelfConsistentSolver with the wrapper functions
          return new SimpleSelfConsistentSolver(mesh, epsilon_r_wrapper, rho_wrapper);
@@ -398,22 +742,32 @@ PYBIND11_MODULE(qdsim_cpp, m) {
 
      // Helper function to create an ImprovedSelfConsistentSolver
      m.def("create_improved_self_consistent_solver", [](Mesh& mesh, pybind11::function epsilon_r_py, pybind11::function rho_py) {
-         // Store the Python callbacks in global variables using shared_ptr
-         g_epsilon_r_py = std::make_shared<pybind11::function>(epsilon_r_py);
-         g_rho_py = std::make_shared<pybind11::function>(rho_py);
+         // Store the Python callbacks in the callback manager
+         setCallback("epsilon_r", epsilon_r_py);
+         setCallback("rho", rho_py);
 
          // Create and return the ImprovedSelfConsistentSolver with the wrapper functions
          return new ImprovedSelfConsistentSolver(mesh, epsilon_r_wrapper, rho_wrapper);
      }, pybind11::arg("mesh"), pybind11::arg("epsilon_r"), pybind11::arg("rho"),
         "Create a new ImprovedSelfConsistentSolver object with the specified mesh and Python callback functions");
 
-     // Helper function to clear the global variables
+     // Helper function to clear all callbacks
      m.def("clear_callbacks", []() {
-         g_epsilon_r_py.reset();
-         g_rho_py.reset();
-         g_n_conc_py.reset();
-         g_p_conc_py.reset();
-         g_mu_n_py.reset();
-         g_mu_p_py.reset();
-     }, "Clear the global Python callbacks to avoid memory leaks");
+         clearCallbacks();
+     }, "Clear all Python callbacks to avoid memory leaks");
+
+     // Helper function to clear a specific callback
+     m.def("clear_callback", [](const std::string& name) {
+         clearCallback(name);
+     }, pybind11::arg("name"),
+        "Clear a specific Python callback to avoid memory leaks");
+
+     // Register the CallbackException class
+     pybind11::register_exception<CallbackException>(m, "CallbackException");
+
+     // Add a function to check if a callback exists
+     m.def("has_callback", [](const std::string& name) {
+         return getCallback(name) != nullptr;
+     }, pybind11::arg("name"),
+        "Check if a callback with the given name exists");
 }

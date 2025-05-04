@@ -253,26 +253,200 @@ double cap(double x, double y, double eta, double Lx, double Ly, double d) {
     return std::max(eta_x, eta_y);
 }
 
+/**
+ * @brief Computes the electron concentration at a given position.
+ *
+ * This function computes the electron concentration at a given position based on
+ * the electrostatic potential and material properties. It uses the Boltzmann
+ * approximation for non-degenerate semiconductors and accounts for the position-dependent
+ * Fermi level and band structure.
+ *
+ * @param x The x-coordinate of the position in nanometers (nm)
+ * @param y The y-coordinate of the position in nanometers (nm)
+ * @param phi The electrostatic potential in volts (V)
+ * @param mat The material properties
+ * @return The electron concentration in per cubic nanometer (1/nm^3)
+ */
 double electron_concentration(double x, double y, double phi, const Materials::Material& mat) {
+    // Constants
     const double kT = 0.0259; // eV at 300K
     const double q = 1.602e-19; // Elementary charge in C
-    double E_F = 0.0; // Simplified; assume constant Fermi level
-    return mat.N_c * std::exp((-q * phi - E_F) / kT);
+    const double kB = 8.617333262e-5; // Boltzmann constant in eV/K
+    const double T = 300.0; // Temperature in K
+
+    // Position-dependent Fermi level (more realistic model)
+    // For n-type region (x > 0), E_F is closer to conduction band
+    // For p-type region (x < 0), E_F is closer to valence band
+    double E_F;
+    if (x > 0) {
+        // n-type region: E_F is kT*ln(N_D/N_c) below conduction band
+        double N_D = 1e16; // Typical donor concentration in 1/nm^3
+        E_F = -kB * T * std::log(mat.N_c / N_D);
+    } else {
+        // p-type region: E_F is kT*ln(N_A/N_v) above valence band
+        double N_A = 1e16; // Typical acceptor concentration in 1/nm^3
+        E_F = -mat.E_g + kB * T * std::log(mat.N_v / N_A);
+    }
+
+    // Calculate conduction band edge relative to Fermi level
+    double E_c = -q * phi - E_F;
+
+    // Calculate electron concentration using Boltzmann statistics
+    // For high carrier concentrations or low temperatures, should use Fermi-Dirac statistics
+    double n = mat.N_c * std::exp(-E_c / kT);
+
+    // Apply limits for numerical stability
+    const double n_min = 1e5; // Minimum concentration for numerical stability
+    const double n_max = 1e20; // Maximum concentration (physical limit)
+    return std::max(std::min(n, n_max), n_min);
 }
 
+/**
+ * @brief Computes the hole concentration at a given position.
+ *
+ * This function computes the hole concentration at a given position based on
+ * the electrostatic potential and material properties. It uses the Boltzmann
+ * approximation for non-degenerate semiconductors and accounts for the position-dependent
+ * Fermi level and band structure.
+ *
+ * @param x The x-coordinate of the position in nanometers (nm)
+ * @param y The y-coordinate of the position in nanometers (nm)
+ * @param phi The electrostatic potential in volts (V)
+ * @param mat The material properties
+ * @return The hole concentration in per cubic nanometer (1/nm^3)
+ */
 double hole_concentration(double x, double y, double phi, const Materials::Material& mat) {
+    // Constants
     const double kT = 0.0259; // eV at 300K
     const double q = 1.602e-19; // Elementary charge in C
-    double E_F = 0.0; // Simplified; assume constant Fermi level
-    return mat.N_v * std::exp((q * phi + mat.E_g - E_F) / kT);
+    const double kB = 8.617333262e-5; // Boltzmann constant in eV/K
+    const double T = 300.0; // Temperature in K
+
+    // Position-dependent Fermi level (more realistic model)
+    // For n-type region (x > 0), E_F is closer to conduction band
+    // For p-type region (x < 0), E_F is closer to valence band
+    double E_F;
+    if (x > 0) {
+        // n-type region: E_F is kT*ln(N_D/N_c) below conduction band
+        double N_D = 1e16; // Typical donor concentration in 1/nm^3
+        E_F = -kB * T * std::log(mat.N_c / N_D);
+    } else {
+        // p-type region: E_F is kT*ln(N_A/N_v) above valence band
+        double N_A = 1e16; // Typical acceptor concentration in 1/nm^3
+        E_F = -mat.E_g + kB * T * std::log(mat.N_v / N_A);
+    }
+
+    // Calculate valence band edge relative to Fermi level
+    double E_v = -q * phi - mat.E_g - E_F;
+
+    // Calculate hole concentration using Boltzmann statistics
+    // For high carrier concentrations or low temperatures, should use Fermi-Dirac statistics
+    double p = mat.N_v * std::exp(E_v / kT);
+
+    // Apply limits for numerical stability
+    const double p_min = 1e5; // Minimum concentration for numerical stability
+    const double p_max = 1e20; // Maximum concentration (physical limit)
+    return std::max(std::min(p, p_max), p_min);
 }
 
+/**
+ * @brief Computes the electron mobility at a given position.
+ *
+ * This function computes the electron mobility at a given position based on
+ * the material properties and temperature. It includes a more realistic model
+ * that accounts for temperature dependence and doping concentration effects.
+ *
+ * @param x The x-coordinate of the position in nanometers (nm)
+ * @param y The y-coordinate of the position in nanometers (nm)
+ * @param mat The material properties
+ * @return The electron mobility in square nanometers per volt-second (nm^2/V·s)
+ */
 double mobility_n(double x, double y, const Materials::Material& mat) {
-    return mat.mu_n;
+    // Constants
+    const double T = 300.0; // Temperature in K
+    const double T0 = 300.0; // Reference temperature in K
+
+    // Get base mobility from material
+    double mu0 = mat.mu_n;
+
+    // Temperature dependence: μ(T) = μ(T0) * (T/T0)^(-alpha)
+    // alpha is typically between 1.5 and 2.5 for electrons
+    const double alpha_n = 2.0;
+    double mu_temp = mu0 * std::pow(T / T0, -alpha_n);
+
+    // Doping concentration dependence
+    // For simplicity, we'll use a position-dependent doping model
+    double N_doping;
+    if (x > 0) {
+        // n-type region
+        N_doping = 1e16; // Typical donor concentration in 1/nm^3
+    } else {
+        // p-type region
+        N_doping = 1e16; // Typical acceptor concentration in 1/nm^3
+    }
+
+    // Caughey-Thomas model: μ = μmin + (μmax - μmin) / (1 + (N/Nref)^beta)
+    const double mu_min = 0.01 * mu0;
+    const double mu_max = mu0;
+    const double N_ref = 1e17; // Reference doping concentration
+    const double beta = 0.7;   // Fitting parameter
+
+    double mu_doping = mu_min + (mu_max - mu_min) / (1.0 + std::pow(N_doping / N_ref, beta));
+
+    // Electric field dependence could be added here if electric field data is available
+
+    // Return the minimum of the temperature and doping dependent mobilities
+    return std::min(mu_temp, mu_doping);
 }
 
+/**
+ * @brief Computes the hole mobility at a given position.
+ *
+ * This function computes the hole mobility at a given position based on
+ * the material properties and temperature. It includes a more realistic model
+ * that accounts for temperature dependence and doping concentration effects.
+ *
+ * @param x The x-coordinate of the position in nanometers (nm)
+ * @param y The y-coordinate of the position in nanometers (nm)
+ * @param mat The material properties
+ * @return The hole mobility in square nanometers per volt-second (nm^2/V·s)
+ */
 double mobility_p(double x, double y, const Materials::Material& mat) {
-    return mat.mu_p;
+    // Constants
+    const double T = 300.0; // Temperature in K
+    const double T0 = 300.0; // Reference temperature in K
+
+    // Get base mobility from material
+    double mu0 = mat.mu_p;
+
+    // Temperature dependence: μ(T) = μ(T0) * (T/T0)^(-alpha)
+    // alpha is typically between 2.0 and 3.0 for holes
+    const double alpha_p = 2.5;
+    double mu_temp = mu0 * std::pow(T / T0, -alpha_p);
+
+    // Doping concentration dependence
+    // For simplicity, we'll use a position-dependent doping model
+    double N_doping;
+    if (x > 0) {
+        // n-type region
+        N_doping = 1e16; // Typical donor concentration in 1/nm^3
+    } else {
+        // p-type region
+        N_doping = 1e16; // Typical acceptor concentration in 1/nm^3
+    }
+
+    // Caughey-Thomas model: μ = μmin + (μmax - μmin) / (1 + (N/Nref)^beta)
+    const double mu_min = 0.01 * mu0;
+    const double mu_max = mu0;
+    const double N_ref = 1e17; // Reference doping concentration
+    const double beta = 0.7;   // Fitting parameter
+
+    double mu_doping = mu_min + (mu_max - mu_min) / (1.0 + std::pow(N_doping / N_ref, beta));
+
+    // Electric field dependence could be added here if electric field data is available
+
+    // Return the minimum of the temperature and doping dependent mobilities
+    return std::min(mu_temp, mu_doping);
 }
 
 } // namespace Physics
