@@ -770,4 +770,38 @@ PYBIND11_MODULE(qdsim_cpp, m) {
          return getCallback(name) != nullptr;
      }, pybind11::arg("name"),
         "Check if a callback with the given name exists");
+
+     // SimpleMesh class for interpolation
+     pybind11::class_<SimpleMesh>(m, "SimpleMesh")
+         .def(pybind11::init<const std::vector<Eigen::Vector2d>&, const std::vector<std::array<int, 3>>&>(),
+              pybind11::arg("nodes"), pybind11::arg("elements"),
+              "Construct a new SimpleMesh object with the specified nodes and elements")
+         .def("get_nodes", &SimpleMesh::getNodes,
+              "Get the nodes of the mesh")
+         .def("get_elements", &SimpleMesh::getElements,
+              "Get the elements of the mesh");
+
+     // Helper function to create a SimpleMesh from a Mesh
+     m.def("create_simple_mesh", [](const Mesh& mesh) {
+         return std::make_unique<SimpleMesh>(mesh.getNodes(), mesh.getElements());
+     }, pybind11::arg("mesh"),
+        "Create a new SimpleMesh object from a Mesh");
+
+     // SimpleInterpolator class for interpolation
+     pybind11::class_<SimpleInterpolator>(m, "SimpleInterpolator")
+         .def(pybind11::init<const SimpleMesh&>(),
+              pybind11::arg("mesh"),
+              "Construct a new SimpleInterpolator object with the specified mesh")
+         .def("interpolate", &SimpleInterpolator::interpolate,
+              pybind11::arg("x"), pybind11::arg("y"), pybind11::arg("values"),
+              "Interpolate a value at a point")
+         .def("find_element", &SimpleInterpolator::findElement,
+              pybind11::arg("x"), pybind11::arg("y"),
+              "Find the element containing a point")
+         .def("compute_barycentric_coordinates", [](const SimpleInterpolator& self, double x, double y, int elem_idx) {
+             std::array<double, 3> lambda;
+             bool inside = self.computeBarycentricCoordinates(x, y, elem_idx, lambda);
+             return std::make_tuple(inside, lambda);
+         }, pybind11::arg("x"), pybind11::arg("y"), pybind11::arg("elem_idx"),
+            "Compute the barycentric coordinates of a point in an element");
 }

@@ -95,6 +95,7 @@ set(SOURCES
     src/gpu_accelerator.cpp
     src/spin_orbit.cpp
     src/error_handling.cpp
+    src/simple_interpolator.cpp
 )
 
 # CUDA source files
