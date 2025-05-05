@@ -32,9 +32,18 @@ This is a high-performance 2D Quantum Dot (QD) Simulator implemented in C++ and 
   - Gaussian potential: Smooth confinement for realistic QD.
 - **Complex Absorbing Potential (CAP)**:
   - Implements CAP to handle outgoing waves in open systems.
+- **Full Poisson-Drift-Diffusion Solver**:
+  - Solves the coupled Poisson-Drift-Diffusion equations for realistic device simulations.
+  - Properly models carrier statistics and transport in semiconductor devices.
+  - Self-consistent iteration scheme for accurate solutions.
+  - Supports both Boltzmann and Fermi-Dirac statistics.
 - **Visualization**:
-  - Python-based visualization of wavefunction density and error estimators using Matplotlib.
+  - Python-based visualization of wavefunction density, potential, carrier concentrations, and electric field.
   - Highlights P2 midpoints (blue) and P3 nodes (green) for higher-order elements.
+  - 3D visualization of potentials and wavefunctions.
+- **GPU Acceleration**:
+  - Accelerates matrix operations and eigensolvers using GPU.
+  - Supports higher-order elements for better accuracy.
 - **Caching**:
   - Stores refined meshes to disk, reducing redundant computations.
 - **GUI and CLI**:
@@ -111,6 +120,63 @@ Where:
 - \( \eta_0 \): CAP strength (e.g., \( 0.1 \, \text{eV} \)).
 - \( L_x, L_y \): Domain dimensions (e.g., 100 nm).
 - \( d \): CAP region width (typically \( L_x/10 \)).
+
+### Poisson-Drift-Diffusion Model
+The simulator also solves the coupled Poisson-Drift-Diffusion equations for realistic device simulations:
+
+#### Poisson Equation
+\[
+\nabla \cdot (\epsilon_r \epsilon_0 \nabla \phi) = -\rho
+\]
+
+Where:
+- \( \phi \): Electrostatic potential (in V).
+- \( \epsilon_r \): Relative permittivity.
+- \( \epsilon_0 \): Vacuum permittivity (\( 8.85 \times 10^{-14} \, \text{F/cm} \)).
+- \( \rho \): Charge density (\( \rho = q(p - n + N_D - N_A) \)).
+- \( q \): Elementary charge (\( 1.602 \times 10^{-19} \, \text{C} \)).
+- \( n, p \): Electron and hole concentrations (in \( \text{cm}^{-3} \)).
+- \( N_D, N_A \): Donor and acceptor concentrations (in \( \text{cm}^{-3} \)).
+
+#### Drift-Diffusion Equations
+\[
+\nabla \cdot \mathbf{J}_n = q(R - G)
+\]
+\[
+\nabla \cdot \mathbf{J}_p = -q(R - G)
+\]
+
+Where:
+- \( \mathbf{J}_n, \mathbf{J}_p \): Electron and hole current densities.
+- \( R \): Recombination rate.
+- \( G \): Generation rate.
+
+The current densities are given by:
+\[
+\mathbf{J}_n = q\mu_n n \nabla \phi_n
+\]
+\[
+\mathbf{J}_p = -q\mu_p p \nabla \phi_p
+\]
+
+Where:
+- \( \mu_n, \mu_p \): Electron and hole mobilities.
+- \( \phi_n, \phi_p \): Quasi-Fermi potentials for electrons and holes.
+
+#### Carrier Statistics
+The carrier concentrations are related to the quasi-Fermi potentials by:
+\[
+n = N_c \mathcal{F}_{1/2}\left(\frac{\phi_n - \phi}{kT}\right)
+\]
+\[
+p = N_v \mathcal{F}_{1/2}\left(\frac{\phi - \phi_p - E_g}{kT}\right)
+\]
+
+Where:
+- \( N_c, N_v \): Effective densities of states in the conduction and valence bands.
+- \( \mathcal{F}_{1/2} \): Fermi-Dirac integral of order 1/2.
+- \( kT \): Thermal voltage (\( 0.0259 \, \text{eV} \) at 300K).
+- \( E_g \): Band gap energy.
 
 ### Weak Form
 The weak form of the Schrödinger equation, used for FEM, is:
@@ -295,6 +361,33 @@ python run_simulator.py
 ```
 
 This will run the simulator and save the results to `energy_shift.png`.
+
+### Chromium Quantum Dot in AlGaAs P-N Junction
+
+This example demonstrates the simulation of a chromium quantum dot in an AlGaAs P-N junction. The quantum dot is positioned at the P-N junction interface, and the simulation shows the electrostatic potential, carrier concentrations, and quantum states.
+
+```bash
+python examples/python_quantum_dot_pn_junction.py
+```
+
+#### Simulation Parameters
+
+- **Device Dimensions**: 200nm x 100nm
+- **P-N Junction**: Located at x = 100nm
+- **Quantum Dot**: Chromium quantum dot with 5nm radius and 0.5eV depth
+- **Doping Concentrations**: 1e17 cm^-3 for both P and N regions
+- **Bias Voltage**: 0.0V (equilibrium)
+
+#### Results
+
+The simulation produces the following results:
+
+1. **Electrostatic Potential**: Shows the combined potential of the P-N junction and the quantum dot.
+2. **Carrier Concentrations**: Shows the electron and hole concentrations in the device.
+3. **Electric Field**: Shows the electric field distribution in the device.
+4. **Quantum States**: Shows the energy levels and wavefunctions of the quantum dot.
+
+The results are saved to `qd_pn_potentials_bias_0.0.png` and `qd_pn_carriers_bias_0.0.png`.
 
 ### Command-line Interface
 
