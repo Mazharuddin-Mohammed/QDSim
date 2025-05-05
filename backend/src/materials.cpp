@@ -12,6 +12,10 @@
 
 #include "materials.h"
 #include <stdexcept>
+#include <cmath>
+#include <vector>
+#include <iostream>
+#include <fstream>
 
 namespace Materials {
 
@@ -511,10 +515,8 @@ Material MaterialDatabase::create_alloy(const std::string& material1, const std:
     alloy.bowing_effective_mass = mat1.bowing_effective_mass;
     alloy.bowing_lattice_constant = mat1.bowing_lattice_constant;
 
-    // Add the alloy to the database if a name is provided
-    if (!name.empty()) {
-        materials[name] = alloy;
-    }
+    // Note: We can't modify the materials map in a const method
+    // The caller should use add_material() to add the alloy to the database
 
     return alloy;
 }

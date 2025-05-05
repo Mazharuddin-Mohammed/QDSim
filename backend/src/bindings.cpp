@@ -29,6 +29,13 @@
 #include "materials.h"
 #include "physics.h"
 #include "fe_interpolator.h"
+#include "pn_junction.h"
+#include "simple_mesh.h"
+#include "simple_interpolator.h"
+#include "schrodinger.h"
+#include "gpu_accelerator.h"
+#include "adaptive_mesh.h"
+#include "full_poisson_dd_solver.h"
 #include <pybind11/pybind11.h>
 #include <pybind11/eigen.h>
 #include <pybind11/stl.h>
@@ -153,6 +160,15 @@ public:
     CallbackException(const std::string& callback_name, double x, double y, const std::string& message)
         : std::runtime_error(formatMessage(callback_name, x, y, message)),
           callback_name_(callback_name), x_(x), y_(y), message_(message) {}
+
+    /**
+     * @brief Construct a new Callback Exception object with a simple message.
+     *
+     * @param message The error message.
+     */
+    CallbackException(const std::string& message)
+        : std::runtime_error(message),
+          callback_name_("unknown"), x_(0.0), y_(0.0), message_(message) {}
 
     /**
      * @brief Get the name of the callback where the error occurred.
@@ -521,7 +537,16 @@ PYBIND11_MODULE(qdsim_cpp, m) {
         .def("get_material", &Materials::MaterialDatabase::get_material,
              pybind11::arg("name"),
              "Get the properties of a material by name")
-        .def("get_all_materials", &Materials::MaterialDatabase::get_all_materials,
+        .def("get_available_materials", &Materials::MaterialDatabase::get_available_materials,
+             "Get a list of all available material names")
+        .def("get_all_materials", [](const Materials::MaterialDatabase& db) {
+             // Create a map of material names to Material objects
+             std::unordered_map<std::string, Materials::Material> materials;
+             for (const auto& name : db.get_available_materials()) {
+                 materials[name] = db.get_material(name);
+             }
+             return materials;
+         },
              "Get a map of all available materials")
         .def("add_material", &Materials::MaterialDatabase::add_material,
              pybind11::arg("name"), pybind11::arg("material"),
@@ -533,9 +558,18 @@ PYBIND11_MODULE(qdsim_cpp, m) {
                            double(*)(double, double, const Eigen::VectorXd&, const Eigen::VectorXd&)>(),
              pybind11::arg("mesh"), pybind11::arg("epsilon_r"), pybind11::arg("rho"),
              "Construct a new PoissonSolver object with the specified mesh, permittivity function, and charge density function")
-        .def("solve", &PoissonSolver::solve,
+        .def("solve", static_cast<void (PoissonSolver::*)(double, double)>(&PoissonSolver::solve),
+             pybind11::arg("V_p"), pybind11::arg("V_n"),
+             "Solve the Poisson equation with the specified boundary potentials")
+        .def("solve", static_cast<void (PoissonSolver::*)(double, double, const Eigen::VectorXd&, const Eigen::VectorXd&)>(&PoissonSolver::solve),
              pybind11::arg("V_p"), pybind11::arg("V_n"), pybind11::arg("n"), pybind11::arg("p"),
              "Solve the Poisson equation with the specified boundary potentials and carrier concentrations")
+        .def("set_potential", &PoissonSolver::set_potential,
+             pybind11::arg("potential"),
+             "Set the potential values directly")
+        .def("set_charge_density", &PoissonSolver::set_charge_density,
+             pybind11::arg("charge_density"),
+             "Set the charge density values directly")
         .def("get_potential", [](const PoissonSolver& solver) { return solver.phi; },
              "Get the computed electrostatic potential")
         .def("get_electric_field", [](const PoissonSolver& solver, double x, double y) {
@@ -576,7 +610,28 @@ PYBIND11_MODULE(qdsim_cpp, m) {
              .def_property("anderson_history_size",
                   [](SelfConsistentSolver& solver) { return solver.anderson_history_size; },
                   [](SelfConsistentSolver& solver, int value) { solver.anderson_history_size = value; },
-                  "Number of previous iterations to use for Anderson acceleration");
+                  "Number of previous iterations to use for Anderson acceleration")
+             .def("set_heterojunction", [](SelfConsistentSolver& solver,
+                                         const std::vector<Materials::Material>& materials,
+                                         const std::vector<pybind11::function>& region_funcs) {
+                 // Convert Python region functions to C++ functions
+                 std::vector<std::function<bool(double, double)>> regions;
+                 for (const auto& func : region_funcs) {
+                     regions.push_back([func](double x, double y) {
+                         pybind11::gil_scoped_acquire gil;
+                         try {
+                             return func(x, y).cast<bool>();
+                         } catch (const std::exception& e) {
+                             std::cerr << "Error in region function: " << e.what() << std::endl;
+                             return false;
+                         }
+                     });
+                 }
+
+                 // Call the C++ method
+                 solver.set_heterojunction(materials, regions);
+             }, pybind11::arg("materials"), pybind11::arg("regions"),
+                "Set the materials and regions for a heterojunction");
 
     // FEMSolver class for quantum simulations
     pybind11::class_<FEMSolver>(m, "FEMSolver")
@@ -711,6 +766,31 @@ PYBIND11_MODULE(qdsim_cpp, m) {
              .def("get_p", &ImprovedSelfConsistentSolver::get_p,
                   "Get the computed hole concentration");
 
+     // SchrodingerSolver class for quantum simulations
+     pybind11::class_<SchrodingerSolver>(m, "SchrodingerSolver")
+             .def(pybind11::init<Mesh&, std::function<double(double, double)>,
+                                std::function<double(double, double)>, bool>(),
+                  pybind11::arg("mesh"), pybind11::arg("m_star"), pybind11::arg("V"),
+                  pybind11::arg("use_gpu") = false,
+                  "Construct a new SchrodingerSolver object with the specified mesh, effective mass function, potential function, and GPU flag")
+             .def("solve", &SchrodingerSolver::solve,
+                  pybind11::arg("num_eigenvalues") = 10,
+                  "Solve the Schrödinger equation and compute the specified number of eigenpairs")
+             .def("get_eigenvalues", &SchrodingerSolver::get_eigenvalues,
+                  "Get the computed eigenvalues")
+             .def("get_eigenvectors", &SchrodingerSolver::get_eigenvectors,
+                  "Get the computed eigenvectors")
+             .def("get_H", &SchrodingerSolver::get_H,
+                  "Get the Hamiltonian matrix")
+             .def("get_M", &SchrodingerSolver::get_M,
+                  "Get the mass matrix")
+             .def("get_mesh", &SchrodingerSolver::get_mesh,
+                  "Get the mesh")
+             .def("is_gpu_enabled", &SchrodingerSolver::is_gpu_enabled,
+                  "Check if GPU acceleration is enabled")
+             .def("get_gpu_accelerator", &SchrodingerSolver::get_gpu_accelerator,
+                  "Get the GPU accelerator");
+
      // Helper functions to create callbacks for SelfConsistentSolver
      m.def("create_self_consistent_solver", [](Mesh& mesh, pybind11::function epsilon_r_py, pybind11::function rho_py,
                                              pybind11::function n_conc_py, pybind11::function p_conc_py,
@@ -751,6 +831,47 @@ PYBIND11_MODULE(qdsim_cpp, m) {
      }, pybind11::arg("mesh"), pybind11::arg("epsilon_r"), pybind11::arg("rho"),
         "Create a new ImprovedSelfConsistentSolver object with the specified mesh and Python callback functions");
 
+     // Helper function to create a SchrodingerSolver
+     m.def("create_schrodinger_solver", [](Mesh& mesh, pybind11::function m_star_py, pybind11::function V_py, bool use_gpu) {
+         // Store the Python callbacks in the callback manager
+         std::string m_star_key = "m_star_" + std::to_string(reinterpret_cast<uintptr_t>(&mesh));
+         std::string V_key = "V_" + std::to_string(reinterpret_cast<uintptr_t>(&mesh));
+
+         setCallback(m_star_key, m_star_py);
+         setCallback(V_key, V_py);
+
+         // Create wrapper functions for the callbacks
+         auto m_star_wrapper = [m_star_key](double x, double y) -> double {
+             pybind11::gil_scoped_acquire gil;
+             try {
+                 auto callback = getCallback(m_star_key);
+                 if (!callback) {
+                     throw std::runtime_error("m_star callback not found");
+                 }
+                 return (*callback)(x, y).cast<double>();
+             } catch (const std::exception& e) {
+                 throw std::runtime_error(std::string("Error in m_star callback: ") + e.what());
+             }
+         };
+
+         auto V_wrapper = [V_key](double x, double y) -> double {
+             pybind11::gil_scoped_acquire gil;
+             try {
+                 auto callback = getCallback(V_key);
+                 if (!callback) {
+                     throw std::runtime_error("V callback not found");
+                 }
+                 return (*callback)(x, y).cast<double>();
+             } catch (const std::exception& e) {
+                 throw std::runtime_error(std::string("Error in V callback: ") + e.what());
+             }
+         };
+
+         // Create and return the SchrodingerSolver with the wrapper functions
+         return new SchrodingerSolver(mesh, m_star_wrapper, V_wrapper, use_gpu);
+     }, pybind11::arg("mesh"), pybind11::arg("m_star"), pybind11::arg("V"), pybind11::arg("use_gpu") = false,
+        "Create a new SchrodingerSolver object with the specified mesh and Python callback functions");
+
      // Helper function to clear all callbacks
      m.def("clear_callbacks", []() {
          clearCallbacks();
@@ -770,6 +891,37 @@ PYBIND11_MODULE(qdsim_cpp, m) {
          return getCallback(name) != nullptr;
      }, pybind11::arg("name"),
         "Check if a callback with the given name exists");
+
+     // GPUAccelerator class for GPU-accelerated computations
+     pybind11::class_<GPUAccelerator>(m, "GPUAccelerator")
+         .def(pybind11::init<bool, int>(),
+              pybind11::arg("use_gpu") = true, pybind11::arg("device_id") = 0,
+              "Construct a new GPUAccelerator object with the specified parameters")
+         .def("is_gpu_enabled", &GPUAccelerator::is_gpu_enabled,
+              "Check if GPU acceleration is enabled")
+         .def("get_device_info", &GPUAccelerator::get_device_info,
+              "Get information about the GPU device")
+         .def("assemble_matrices", &GPUAccelerator::assemble_matrices,
+              pybind11::arg("mesh"), pybind11::arg("m_star"), pybind11::arg("V"),
+              pybind11::arg("order"), pybind11::arg("H"), pybind11::arg("M"),
+              "Assemble matrices on GPU")
+         .def("assemble_higher_order_matrices", &GPUAccelerator::assemble_higher_order_matrices,
+              pybind11::arg("mesh"), pybind11::arg("m_star"), pybind11::arg("V"),
+              pybind11::arg("order"), pybind11::arg("H"), pybind11::arg("M"),
+              "Assemble higher-order matrices on GPU")
+         .def("solve_eigen", &GPUAccelerator::solve_eigen,
+              pybind11::arg("H"), pybind11::arg("M"), pybind11::arg("num_eigenvalues"),
+              pybind11::arg("eigenvalues"), pybind11::arg("eigenvectors"),
+              "Solve eigenvalue problem on GPU")
+         .def("solve_eigen_sparse", &GPUAccelerator::solve_eigen_sparse,
+              pybind11::arg("H"), pybind11::arg("M"), pybind11::arg("num_eigenvalues"),
+              pybind11::arg("eigenvalues"), pybind11::arg("eigenvectors"),
+              pybind11::arg("tolerance") = 1e-10, pybind11::arg("max_iterations") = 1000,
+              "Solve sparse eigenvalue problem on GPU")
+         .def("interpolate_field", &GPUAccelerator::interpolate_field,
+              pybind11::arg("mesh"), pybind11::arg("field"), pybind11::arg("points"),
+              pybind11::arg("values"),
+              "Interpolate field on GPU");
 
      // SimpleMesh class for interpolation
      pybind11::class_<SimpleMesh>(m, "SimpleMesh")
@@ -804,4 +956,139 @@ PYBIND11_MODULE(qdsim_cpp, m) {
              return std::make_tuple(inside, lambda);
          }, pybind11::arg("x"), pybind11::arg("y"), pybind11::arg("elem_idx"),
             "Compute the barycentric coordinates of a point in an element");
+
+     // PNJunction class for P-N junction simulations
+     pybind11::class_<PNJunction>(m, "PNJunction")
+         .def(pybind11::init<Mesh&, double, double, double, double, double, double>(),
+              pybind11::arg("mesh"), pybind11::arg("epsilon_r"), pybind11::arg("N_A"),
+              pybind11::arg("N_D"), pybind11::arg("T"), pybind11::arg("junction_position"),
+              pybind11::arg("V_r"),
+              "Construct a new PNJunction object with the specified parameters")
+         .def("calculate_built_in_potential", &PNJunction::calculate_built_in_potential,
+              "Calculate the built-in potential of the P-N junction")
+         .def("calculate_depletion_width", &PNJunction::calculate_depletion_width,
+              "Calculate the depletion width of the P-N junction")
+         .def("calculate_intrinsic_carrier_concentration", &PNJunction::calculate_intrinsic_carrier_concentration,
+              "Calculate the intrinsic carrier concentration")
+         .def("solve", &PNJunction::solve,
+              "Solve the Poisson equation for the electrostatic potential")
+         .def("get_potential", &PNJunction::get_potential,
+              pybind11::arg("x"), pybind11::arg("y"),
+              "Get the electrostatic potential at a given position")
+         .def("get_electric_field", &PNJunction::get_electric_field,
+              pybind11::arg("x"), pybind11::arg("y"),
+              "Get the electric field at a given position")
+         .def("get_electron_concentration", &PNJunction::get_electron_concentration,
+              pybind11::arg("x"), pybind11::arg("y"),
+              "Get the electron concentration at a given position")
+         .def("get_hole_concentration", &PNJunction::get_hole_concentration,
+              pybind11::arg("x"), pybind11::arg("y"),
+              "Get the hole concentration at a given position")
+         .def("get_conduction_band_edge", &PNJunction::get_conduction_band_edge,
+              pybind11::arg("x"), pybind11::arg("y"),
+              "Get the conduction band edge at a given position")
+         .def("get_valence_band_edge", &PNJunction::get_valence_band_edge,
+              pybind11::arg("x"), pybind11::arg("y"),
+              "Get the valence band edge at a given position")
+         .def("get_quasi_fermi_level_electrons", &PNJunction::get_quasi_fermi_level_electrons,
+              pybind11::arg("x"), pybind11::arg("y"),
+              "Get the quasi-Fermi level for electrons at a given position")
+         .def("get_quasi_fermi_level_holes", &PNJunction::get_quasi_fermi_level_holes,
+              pybind11::arg("x"), pybind11::arg("y"),
+              "Get the quasi-Fermi level for holes at a given position")
+         .def("update_bias", &PNJunction::update_bias,
+              pybind11::arg("V_r"),
+              "Update the reverse bias voltage")
+         .def("update_doping", &PNJunction::update_doping,
+              pybind11::arg("N_A"), pybind11::arg("N_D"),
+              "Update the doping concentrations")
+         .def_property_readonly("V_bi", &PNJunction::get_V_bi,
+              "Get the built-in potential")
+         .def_property_readonly("V_r", &PNJunction::get_V_r,
+              "Get the reverse bias voltage")
+         .def_property_readonly("V_total", &PNJunction::get_V_total,
+              "Get the total potential across the junction")
+         .def_property_readonly("W", &PNJunction::get_W,
+              "Get the depletion width")
+         .def_property_readonly("W_p", &PNJunction::get_W_p,
+              "Get the P-side depletion width")
+         .def_property_readonly("W_n", &PNJunction::get_W_n,
+              "Get the N-side depletion width")
+         .def_property_readonly("N_A", &PNJunction::get_N_A,
+              "Get the acceptor concentration")
+         .def_property_readonly("N_D", &PNJunction::get_N_D,
+              "Get the donor concentration")
+         .def_property_readonly("n_i", &PNJunction::get_n_i,
+              "Get the intrinsic carrier concentration")
+         .def_property_readonly("junction_position", &PNJunction::get_junction_position,
+              "Get the position of the junction");
+
+    // Wrapper function for AdaptiveMesh::refineMesh
+    auto refine_mesh_wrapper = [](Mesh& mesh, const std::vector<bool>& refine_flags) {
+#ifdef USE_MPI
+        AdaptiveMesh::refineMesh(mesh, refine_flags, MPI_COMM_WORLD);
+#else
+        AdaptiveMesh::refineMesh(mesh, refine_flags);
+#endif
+    };
+
+    // AdaptiveMesh class for adaptive mesh refinement
+    pybind11::class_<AdaptiveMesh>(m, "AdaptiveMesh")
+        .def_static("refine_mesh", refine_mesh_wrapper,
+                   pybind11::arg("mesh"), pybind11::arg("refine_flags"),
+                   "Refine the mesh based on refinement flags")
+        .def_static("compute_refinement_flags", &AdaptiveMesh::computeRefinementFlags,
+                   pybind11::arg("mesh"), pybind11::arg("psi"), pybind11::arg("threshold"),
+                   "Compute refinement flags based on solution gradients")
+        .def_static("smooth_mesh", &AdaptiveMesh::smoothMesh,
+                   pybind11::arg("mesh"),
+                   "Smooth the mesh to improve element quality")
+        .def_static("compute_triangle_quality", &AdaptiveMesh::computeTriangleQuality,
+                   pybind11::arg("mesh"), pybind11::arg("elem_idx"),
+                   "Compute the quality of a triangular element")
+        .def_static("is_mesh_conforming", &AdaptiveMesh::isMeshConforming,
+                   pybind11::arg("mesh"),
+                   "Check if the mesh is conforming");
+
+    // FullPoissonDriftDiffusionSolver class for comprehensive semiconductor device simulations
+    pybind11::class_<FullPoissonDriftDiffusionSolver>(m, "FullPoissonDriftDiffusionSolver")
+        .def(pybind11::init<Mesh&, std::function<double(double, double)>, std::function<double(double, double)>>(),
+             pybind11::arg("mesh"), pybind11::arg("epsilon_r"), pybind11::arg("doping_profile"),
+             "Construct a new FullPoissonDriftDiffusionSolver object")
+        .def("solve", &FullPoissonDriftDiffusionSolver::solve,
+             pybind11::arg("V_p"), pybind11::arg("V_n"), pybind11::arg("tolerance") = 1e-6, pybind11::arg("max_iter") = 100,
+             "Solve the coupled Poisson-drift-diffusion equations")
+        .def("get_potential", &FullPoissonDriftDiffusionSolver::get_potential,
+             "Get the computed electrostatic potential")
+        .def("get_electron_concentration", &FullPoissonDriftDiffusionSolver::get_electron_concentration,
+             "Get the computed electron concentration")
+        .def("get_hole_concentration", &FullPoissonDriftDiffusionSolver::get_hole_concentration,
+             "Get the computed hole concentration")
+        .def("get_electric_field", static_cast<Eigen::Vector2d (FullPoissonDriftDiffusionSolver::*)(double, double) const>(&FullPoissonDriftDiffusionSolver::get_electric_field),
+             pybind11::arg("x"), pybind11::arg("y"),
+             "Get the electric field at a given position")
+        .def("get_electric_field_all", static_cast<const std::vector<Eigen::Vector2d>& (FullPoissonDriftDiffusionSolver::*)() const>(&FullPoissonDriftDiffusionSolver::get_electric_field),
+             "Get the computed electric field at all mesh nodes")
+        .def("get_electron_current_density", &FullPoissonDriftDiffusionSolver::get_electron_current_density,
+             "Get the computed electron current density")
+        .def("get_hole_current_density", &FullPoissonDriftDiffusionSolver::get_hole_current_density,
+             "Get the computed hole current density")
+        .def("set_heterojunction", &FullPoissonDriftDiffusionSolver::set_heterojunction,
+             pybind11::arg("materials"), pybind11::arg("regions"),
+             "Set the material properties for a heterojunction")
+        .def("set_generation_recombination_model", &FullPoissonDriftDiffusionSolver::set_generation_recombination_model,
+             pybind11::arg("g_r"),
+             "Set the generation-recombination model")
+        .def("set_mobility_models", &FullPoissonDriftDiffusionSolver::set_mobility_models,
+             pybind11::arg("mu_n"), pybind11::arg("mu_p"),
+             "Set the mobility models for electrons and holes")
+        .def("set_carrier_statistics_model", &FullPoissonDriftDiffusionSolver::set_carrier_statistics_model,
+             pybind11::arg("use_fermi_dirac"),
+             "Set the carrier statistics model")
+        .def("enable_quantum_corrections", &FullPoissonDriftDiffusionSolver::enable_quantum_corrections,
+             pybind11::arg("enable"),
+             "Enable or disable quantum corrections")
+        .def("enable_adaptive_mesh_refinement", &FullPoissonDriftDiffusionSolver::enable_adaptive_mesh_refinement,
+             pybind11::arg("enable"), pybind11::arg("refinement_threshold") = 0.1, pybind11::arg("max_refinement_level") = 3,
+             "Enable or disable adaptive mesh refinement");
 }

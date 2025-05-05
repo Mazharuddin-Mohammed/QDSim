@@ -498,11 +498,19 @@ double AdaptiveMesh::computeTriangleQuality(const Mesh& mesh, int elem_idx) {
     const auto& nodes = mesh.getNodes();
     Eigen::Vector2d a = nodes[elem[0]], b = nodes[elem[1]], c = nodes[elem[2]];
 
-    double l1 = (b - a).norm(), l2 = (c - b).norm(), l3 = (a - c).norm();
+    // Compute edge lengths
+    double l1 = (b - a).norm();
+    double l2 = (c - b).norm();
+    double l3 = (a - c).norm();
+
+    // Compute area using Heron's formula
     double s = (l1 + l2 + l3) / 2.0;
     double area = std::sqrt(s * (s - l1) * (s - l2) * (s - l3));
-    if (area < 1e-10) return 0.0;
-    return 4.0 * std::sqrt(3.0) * area / (l1 * l1 + l2 * l2 + l3 * l3);
+
+    // Compute quality measure
+    double quality = 4.0 * std::sqrt(3.0) * area / (l1*l1 + l2*l2 + l3*l3);
+
+    return quality;
 }
 
 /**
@@ -511,31 +519,38 @@ double AdaptiveMesh::computeTriangleQuality(const Mesh& mesh, int elem_idx) {
  * This method checks if the mesh is conforming, i.e., if there are no
  * hanging nodes. A conforming mesh is required for finite element analysis.
  *
- * The algorithm checks that each edge is shared by at most two elements.
- * If an edge is shared by more than two elements, the mesh is non-conforming.
+ * The algorithm builds an edge-to-element map and checks that each edge
+ * is shared by at most two elements. If an edge is shared by more than
+ * two elements, the mesh is non-conforming.
  *
  * @param mesh The mesh to check
  * @return True if the mesh is conforming, false otherwise
  */
 bool AdaptiveMesh::isMeshConforming(const Mesh& mesh) {
-    // Get mesh elements
+    // Get mesh data
     const auto& elements = mesh.getElements();
 
-    // Map each edge to the elements that contain it
+    // Build edge-to-element map
     std::map<std::pair<int, int>, std::vector<int>> edge_to_elements;
 
     for (size_t i = 0; i < elements.size(); ++i) {
         const auto& elem = elements[i];
         for (int j = 0; j < 3; ++j) {
-            auto edge = std::minmax(elem[j], elem[(j + 1) % 3]);
+            int n1 = elem[j];
+            int n2 = elem[(j + 1) % 3];
+            auto edge = std::minmax(n1, n2);
             edge_to_elements[edge].push_back(i);
         }
     }
 
-    for (const auto& [edge, elem_list] : edge_to_elements) {
-        if (elem_list.size() > 2) {
+    // Check for hanging nodes
+    for (const auto& [edge, elems] : edge_to_elements) {
+        if (elems.size() > 2) {
+            // Edge is shared by more than two elements, which indicates a hanging node
             return false;
         }
     }
+
     return true;
 }
+

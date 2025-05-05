@@ -174,6 +174,45 @@ void Mesh::refine(const std::vector<bool>& refine_flags) {
     AdaptiveMesh::refineMesh(*this, refine_flags);
 }
 
+/**
+ * @brief Refines the mesh based on the given element indices.
+ *
+ * This method refines the mesh by subdividing the elements with the given indices.
+ * The refinement is performed in a way that maintains the mesh quality and
+ * ensures that the resulting mesh is conforming (no hanging nodes).
+ *
+ * @param element_indices A vector of element indices to refine
+ * @param max_refinement_level The maximum refinement level
+ * @return True if the mesh was refined, false otherwise
+ *
+ * @throws std::invalid_argument If any of the element indices are out of range
+ */
+bool Mesh::refine(const std::vector<int>& element_indices, int max_refinement_level) {
+    // Check if there are any elements to refine
+    if (element_indices.empty()) {
+        return false;
+    }
+
+    // Check if the element indices are valid
+    for (int idx : element_indices) {
+        if (idx < 0 || idx >= static_cast<int>(elements.size())) {
+            throw std::invalid_argument("Element index out of range");
+        }
+    }
+
+    // Create a vector of refinement flags
+    std::vector<bool> refine_flags(elements.size(), false);
+    for (int idx : element_indices) {
+        refine_flags[idx] = true;
+    }
+
+    // Refine the mesh
+    AdaptiveMesh::refineMesh(*this, refine_flags);
+
+    // Check if the mesh was refined
+    return true;
+}
+
 #ifdef USE_MPI
 /**
  * @brief Refines the mesh in parallel using MPI.

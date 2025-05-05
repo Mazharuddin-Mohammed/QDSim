@@ -467,37 +467,21 @@ void FEMSolver::adapt_mesh(const Eigen::VectorXd& eigenvector, double threshold,
         return;
     }
 
-    // Use the new AdaptiveRefinement class for advanced refinement
-    AdaptiveRefinement adaptive_refinement(mesh, EstimatorType::ZZ_RECOVERY, ErrorNorm::ENERGY, QualityMetric::SHAPE_REGULARITY);
+    // Compute refinement flags based on the eigenvector and threshold
+    std::vector<bool> refine_flags = AdaptiveMesh::computeRefinementFlags(mesh, eigenvector, threshold);
 
-    // Refine the mesh adaptively
-    bool refined = adaptive_refinement.refine(
-        eigenvector, H, M,
-        [this](double x, double y) { return this->m_star(x, y); },
-        [this](double x, double y) { return this->V(x, y); },
-        RefinementStrategy::FIXED_THRESHOLD,
-        threshold,
-        true
-    );
-
-    // If no refinement occurred, use the old method as a fallback
-    if (!refined) {
-        // Compute refinement flags based on the eigenvector and threshold
-        std::vector<bool> refine_flags = AdaptiveMesh::computeRefinementFlags(mesh, eigenvector, threshold);
-
-        // Use MPI for mesh refinement if enabled
-        if (use_mpi) {
-    #ifdef USE_MPI
-            // Refine the mesh in parallel using MPI
-            mesh.refine(refine_flags, MPI_COMM_WORLD);
-    #else
-            // Fallback to serial refinement if MPI is disabled at compile time
-            mesh.refine(refine_flags);
-    #endif
-        } else {
-            // Refine the mesh in serial mode
-            mesh.refine(refine_flags);
-        }
+    // Use MPI for mesh refinement if enabled
+    if (use_mpi) {
+#ifdef USE_MPI
+        // Refine the mesh in parallel using MPI
+        mesh.refine(refine_flags, MPI_COMM_WORLD);
+#else
+        // Fallback to serial refinement if MPI is disabled at compile time
+        mesh.refine(refine_flags);
+#endif
+    } else {
+        // Refine the mesh in serial mode
+        mesh.refine(refine_flags);
     }
 
     // Save the refined mesh to the cache if enabled
@@ -519,9 +503,8 @@ void FEMSolver::adapt_mesh(const Eigen::VectorXd& eigenvector, double threshold,
 
     // Print mesh quality information
     std::cout << "Mesh quality after refinement:" << std::endl;
-    std::cout << "  Minimum quality: " << adaptive_refinement.getMinQuality() << std::endl;
-    std::cout << "  Average quality: " << adaptive_refinement.getAvgQuality() << std::endl;
-    std::cout << "  Global error norm: " << adaptive_refinement.getGlobalErrorNorm() << std::endl;
+    std::cout << "  Number of nodes: " << mesh.getNumNodes() << std::endl;
+    std::cout << "  Number of elements: " << mesh.getNumElements() << std::endl;
 }
 
 
