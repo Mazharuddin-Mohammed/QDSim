@@ -97,6 +97,7 @@ data/meshes/
 *.jpg
 *.jpeg
 *.pdf
+*.csv
 plots/
 results_2d/
 results/
