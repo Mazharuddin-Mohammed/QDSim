@@ -304,8 +304,14 @@ qdsim/
 │   │   └── test_visualization.py
 │   ├── run_simulation.py
 │   └── requirements.txt
+├── examples/
+│   ├── python_quantum_dot_pn_junction.py
+│   ├── gpu_acceleration_example.py
+│   └── ...
 ├── CMakeLists.txt
-└── README.md
+├── README.md
+├── CONTRIBUTING.md
+└── LICENSE
 ```
 
 ## Dependencies
@@ -491,3 +497,13 @@ Important headers for proper conversion:
 - `<pybind11/stl.h>`: Conversion of STL containers
 - `<pybind11/complex.h>`: Conversion of complex numbers
 - `<pybind11/functional.h>`: Conversion of function objects
+
+## Contributing
+
+We welcome contributions to QDSim! Please see the [CONTRIBUTING.md](CONTRIBUTING.md) file for guidelines on how to contribute to this project.
+
+## License
+
+QDSim is released under the MIT License. See the [LICENSE](LICENSE) file for details.
+
+Copyright (c) 2023 Dr. Mazharuddin Mohammed
