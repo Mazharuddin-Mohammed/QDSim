@@ -133,6 +133,91 @@ public:
                           const std::vector<Eigen::Vector2d>& points,
                           Eigen::VectorXd& values);
 
+    /**
+     * @brief Optimized assembly for higher-order elements on the GPU.
+     *
+     * This method provides specialized optimizations for higher-order elements (P2, P3)
+     * which have more complex shape functions and require more quadrature points.
+     *
+     * @param mesh The mesh to use for the simulation
+     * @param m_star Function that returns the effective mass at a given position
+     * @param V Function that returns the potential at a given position
+     * @param order The order of the finite elements (2 for P2, 3 for P3)
+     * @param H The Hamiltonian matrix (output)
+     * @param M The mass matrix (output)
+     *
+     * @throws std::runtime_error If the assembly fails
+     */
+    void assemble_higher_order_matrices(const Mesh& mesh,
+                                      double (*m_star)(double, double),
+                                      double (*V)(double, double),
+                                      int order,
+                                      Eigen::SparseMatrix<std::complex<double>>& H,
+                                      Eigen::SparseMatrix<std::complex<double>>& M);
+
+    /**
+     * @brief Solves the generalized eigenvalue problem using cuSOLVER.
+     *
+     * @param H_dense The dense Hamiltonian matrix
+     * @param M_dense The dense mass matrix
+     * @param num_eigenvalues The number of eigenvalues to compute
+     * @param eigenvalues The computed eigenvalues (output)
+     * @param eigenvectors The computed eigenvectors (output)
+     *
+     * @throws std::runtime_error If the solver fails
+     */
+    void solve_eigen_cusolver(const Eigen::MatrixXcd& H_dense,
+                            const Eigen::MatrixXcd& M_dense,
+                            int num_eigenvalues,
+                            std::vector<std::complex<double>>& eigenvalues,
+                            std::vector<Eigen::VectorXd>& eigenvectors);
+
+    /**
+     * @brief Optimized eigensolver for large sparse matrices from higher-order elements.
+     *
+     * This method uses a specialized implementation for large sparse matrices that
+     * typically arise from higher-order finite element discretizations. It employs
+     * iterative methods that are more suitable for large problems than direct solvers.
+     *
+     * @param H The sparse Hamiltonian matrix
+     * @param M The sparse mass matrix
+     * @param num_eigenvalues The number of eigenvalues to compute
+     * @param eigenvalues The computed eigenvalues (output)
+     * @param eigenvectors The computed eigenvectors (output)
+     * @param tolerance The convergence tolerance
+     * @param max_iterations The maximum number of iterations
+     *
+     * @throws std::runtime_error If the solver fails
+     */
+    void solve_eigen_sparse(const Eigen::SparseMatrix<std::complex<double>>& H,
+                          const Eigen::SparseMatrix<std::complex<double>>& M,
+                          int num_eigenvalues,
+                          std::vector<std::complex<double>>& eigenvalues,
+                          std::vector<Eigen::VectorXd>& eigenvectors,
+                          double tolerance = 1e-10,
+                          int max_iterations = 1000);
+
+    /**
+     * @brief Batched eigensolver for multiple small eigenproblems.
+     *
+     * This method solves multiple small eigenproblems in parallel using batched
+     * operations on the GPU. This is useful for parameter sweeps or when solving
+     * the same problem with different parameters.
+     *
+     * @param H_batch Vector of Hamiltonian matrices
+     * @param M_batch Vector of mass matrices
+     * @param num_eigenvalues The number of eigenvalues to compute for each problem
+     * @param eigenvalues_batch Vector of eigenvalue vectors (output)
+     * @param eigenvectors_batch Vector of eigenvector vectors (output)
+     *
+     * @throws std::runtime_error If the solver fails
+     */
+    void solve_eigen_batched(const std::vector<Eigen::MatrixXcd>& H_batch,
+                           const std::vector<Eigen::MatrixXcd>& M_batch,
+                           int num_eigenvalues,
+                           std::vector<std::vector<std::complex<double>>>& eigenvalues_batch,
+                           std::vector<std::vector<Eigen::VectorXd>>& eigenvectors_batch);
+
 private:
     bool use_gpu_;                 ///< Whether to use GPU acceleration
     int device_id_;                ///< The ID of the GPU device to use
@@ -180,20 +265,35 @@ private:
                                    std::complex<double>* M_e);
 
     /**
-     * @brief Solves the generalized eigenvalue problem using cuSOLVER.
+     * @brief Solve the generalized eigenvalue problem on GPU.
      *
-     * @param H_dense The dense Hamiltonian matrix
-     * @param M_dense The dense mass matrix
+     * @param H The Hamiltonian matrix
+     * @param M The mass matrix
      * @param num_eigenvalues The number of eigenvalues to compute
-     * @param eigenvalues The computed eigenvalues (output)
-     * @param eigenvectors The computed eigenvectors (output)
-     *
-     * @throws std::runtime_error If the solver fails
+     * @param eigenvalues The eigenvalues (output)
+     * @param eigenvectors The eigenvectors (output)
      */
-    void solve_eigen_cusolver(const Eigen::MatrixXcd& H_dense,
-                            const Eigen::MatrixXcd& M_dense,
-                            int num_eigenvalues,
-                            std::vector<std::complex<double>>& eigenvalues,
-                            std::vector<Eigen::VectorXd>& eigenvectors);
+    void solve_eigenvalue_problem_gpu(
+        const Eigen::SparseMatrix<std::complex<double>>& H,
+        const Eigen::SparseMatrix<std::complex<double>>& M,
+        int num_eigenvalues,
+        std::vector<double>& eigenvalues,
+        std::vector<Eigen::VectorXcd>& eigenvectors);
+
+    /**
+     * @brief Convert Eigen sparse matrix to CSR format.
+     *
+     * @param mat The Eigen sparse matrix
+     * @param rowPtr The CSR row pointer array (output)
+     * @param colInd The CSR column index array (output)
+     * @param values The CSR value array (output)
+     */
+    void eigen_sparse_to_csr(
+        const Eigen::SparseMatrix<std::complex<double>>& mat,
+        std::vector<int>& rowPtr,
+        std::vector<int>& colInd,
+        std::vector<std::complex<double>>& values);
+
+
 #endif
 };

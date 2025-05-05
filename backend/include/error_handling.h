@@ -17,6 +17,7 @@
 #include <sstream>
 #include <vector>
 #include <memory>
+#include <fstream>
 
 /**
  * @namespace ErrorHandling
@@ -38,53 +39,53 @@ enum class ErrorCode {
     FILE_NOT_FOUND = 5,
     FILE_FORMAT_ERROR = 6,
     PERMISSION_DENIED = 7,
-    
+
     // Mesh errors
     MESH_CREATION_FAILED = 100,
     MESH_REFINEMENT_FAILED = 101,
     MESH_QUALITY_ERROR = 102,
     MESH_TOPOLOGY_ERROR = 103,
-    
+
     // Matrix assembly errors
     MATRIX_ASSEMBLY_FAILED = 200,
     MATRIX_DIMENSION_MISMATCH = 201,
     MATRIX_NOT_POSITIVE_DEFINITE = 202,
-    
+
     // Solver errors
     SOLVER_INITIALIZATION_FAILED = 300,
     SOLVER_CONVERGENCE_FAILED = 301,
     EIGENVALUE_COMPUTATION_FAILED = 302,
     LINEAR_SYSTEM_SOLVE_FAILED = 303,
-    
+
     // Physics errors
     INVALID_MATERIAL = 400,
     INVALID_POTENTIAL = 401,
     INVALID_BOUNDARY_CONDITION = 402,
     PHYSICAL_PARAMETER_OUT_OF_RANGE = 403,
-    
+
     // Self-consistent solver errors
     SELF_CONSISTENT_DIVERGENCE = 500,
     POISSON_SOLVE_FAILED = 501,
     DRIFT_DIFFUSION_SOLVE_FAILED = 502,
-    
+
     // Memory errors
     MEMORY_ALLOCATION_FAILED = 600,
     OUT_OF_MEMORY = 601,
-    
+
     // Parallel computing errors
     MPI_ERROR = 700,
     CUDA_ERROR = 701,
     THREAD_ERROR = 702,
-    
+
     // I/O errors
     IO_ERROR = 800,
     SERIALIZATION_ERROR = 801,
     DESERIALIZATION_ERROR = 802,
-    
+
     // Visualization errors
     VISUALIZATION_ERROR = 900,
     PLOT_CREATION_FAILED = 901,
-    
+
     // Python binding errors
     BINDING_ERROR = 1000,
     CALLBACK_ERROR = 1001
@@ -108,8 +109,8 @@ public:
      * @param line The line where the error occurred
      * @param function The function where the error occurred
      */
-    QDSimException(ErrorCode code, const std::string& message, 
-                  const std::string& file = "", int line = 0, 
+    QDSimException(ErrorCode code, const std::string& message,
+                  const std::string& file = "", int line = 0,
                   const std::string& function = "")
         : code_(code), message_(message), file_(file), line_(line), function_(function) {
         // Build the full error message
@@ -127,7 +128,7 @@ public:
         }
         full_message_ = oss.str();
     }
-    
+
     /**
      * @brief Returns the error message.
      *
@@ -136,7 +137,7 @@ public:
     const char* what() const noexcept override {
         return full_message_.c_str();
     }
-    
+
     /**
      * @brief Gets the error code.
      *
@@ -145,7 +146,7 @@ public:
     ErrorCode code() const {
         return code_;
     }
-    
+
     /**
      * @brief Gets the error message.
      *
@@ -154,7 +155,7 @@ public:
     const std::string& message() const {
         return message_;
     }
-    
+
     /**
      * @brief Gets the file where the error occurred.
      *
@@ -163,7 +164,7 @@ public:
     const std::string& file() const {
         return file_;
     }
-    
+
     /**
      * @brief Gets the line where the error occurred.
      *
@@ -172,7 +173,7 @@ public:
     int line() const {
         return line_;
     }
-    
+
     /**
      * @brief Gets the function where the error occurred.
      *
@@ -181,7 +182,7 @@ public:
     const std::string& function() const {
         return function_;
     }
-    
+
 private:
     ErrorCode code_;          ///< The error code
     std::string message_;     ///< The error message
@@ -208,58 +209,58 @@ inline std::string get_error_message(ErrorCode code) {
         {ErrorCode::FILE_NOT_FOUND, "File not found"},
         {ErrorCode::FILE_FORMAT_ERROR, "Invalid file format"},
         {ErrorCode::PERMISSION_DENIED, "Permission denied"},
-        
+
         // Mesh errors
         {ErrorCode::MESH_CREATION_FAILED, "Failed to create mesh"},
         {ErrorCode::MESH_REFINEMENT_FAILED, "Failed to refine mesh"},
         {ErrorCode::MESH_QUALITY_ERROR, "Mesh quality is too low"},
         {ErrorCode::MESH_TOPOLOGY_ERROR, "Invalid mesh topology"},
-        
+
         // Matrix assembly errors
         {ErrorCode::MATRIX_ASSEMBLY_FAILED, "Failed to assemble matrix"},
         {ErrorCode::MATRIX_DIMENSION_MISMATCH, "Matrix dimensions do not match"},
         {ErrorCode::MATRIX_NOT_POSITIVE_DEFINITE, "Matrix is not positive definite"},
-        
+
         // Solver errors
         {ErrorCode::SOLVER_INITIALIZATION_FAILED, "Failed to initialize solver"},
         {ErrorCode::SOLVER_CONVERGENCE_FAILED, "Solver failed to converge"},
         {ErrorCode::EIGENVALUE_COMPUTATION_FAILED, "Failed to compute eigenvalues"},
         {ErrorCode::LINEAR_SYSTEM_SOLVE_FAILED, "Failed to solve linear system"},
-        
+
         // Physics errors
         {ErrorCode::INVALID_MATERIAL, "Invalid material properties"},
         {ErrorCode::INVALID_POTENTIAL, "Invalid potential function"},
         {ErrorCode::INVALID_BOUNDARY_CONDITION, "Invalid boundary condition"},
         {ErrorCode::PHYSICAL_PARAMETER_OUT_OF_RANGE, "Physical parameter out of valid range"},
-        
+
         // Self-consistent solver errors
         {ErrorCode::SELF_CONSISTENT_DIVERGENCE, "Self-consistent solution diverged"},
         {ErrorCode::POISSON_SOLVE_FAILED, "Failed to solve Poisson equation"},
         {ErrorCode::DRIFT_DIFFUSION_SOLVE_FAILED, "Failed to solve drift-diffusion equations"},
-        
+
         // Memory errors
         {ErrorCode::MEMORY_ALLOCATION_FAILED, "Failed to allocate memory"},
         {ErrorCode::OUT_OF_MEMORY, "Out of memory"},
-        
+
         // Parallel computing errors
         {ErrorCode::MPI_ERROR, "MPI error occurred"},
         {ErrorCode::CUDA_ERROR, "CUDA error occurred"},
         {ErrorCode::THREAD_ERROR, "Thread error occurred"},
-        
+
         // I/O errors
         {ErrorCode::IO_ERROR, "I/O error occurred"},
         {ErrorCode::SERIALIZATION_ERROR, "Failed to serialize data"},
         {ErrorCode::DESERIALIZATION_ERROR, "Failed to deserialize data"},
-        
+
         // Visualization errors
         {ErrorCode::VISUALIZATION_ERROR, "Visualization error occurred"},
         {ErrorCode::PLOT_CREATION_FAILED, "Failed to create plot"},
-        
+
         // Python binding errors
         {ErrorCode::BINDING_ERROR, "Python binding error occurred"},
         {ErrorCode::CALLBACK_ERROR, "Callback function error occurred"}
     };
-    
+
     auto it = error_messages.find(code);
     if (it != error_messages.end()) {
         return it->second;
@@ -279,8 +280,8 @@ inline std::string get_error_message(ErrorCode code) {
  *
  * @throws QDSimException with the specified error information
  */
-inline void throw_error(ErrorCode code, const std::string& message = "", 
-                       const std::string& file = "", int line = 0, 
+inline void throw_error(ErrorCode code, const std::string& message = "",
+                       const std::string& file = "", int line = 0,
                        const std::string& function = "") {
     std::string error_message = message.empty() ? get_error_message(code) : message;
     throw QDSimException(code, error_message, file, line, function);
@@ -399,7 +400,7 @@ public:
         ERROR,
         FATAL
     };
-    
+
     /**
      * @brief Gets the singleton instance of the ErrorLogger.
      *
@@ -409,7 +410,7 @@ public:
         static ErrorLogger instance;
         return instance;
     }
-    
+
     /**
      * @brief Sets the log level.
      *
@@ -418,7 +419,7 @@ public:
     void set_log_level(LogLevel level) {
         log_level_ = level;
     }
-    
+
     /**
      * @brief Sets the log file.
      *
@@ -430,7 +431,7 @@ public:
             log_stream_.open(log_file_, std::ios::out | std::ios::app);
         }
     }
-    
+
     /**
      * @brief Logs a message.
      *
@@ -440,13 +441,13 @@ public:
      * @param line The line where the log is generated
      * @param function The function where the log is generated
      */
-    void log(LogLevel level, const std::string& message, 
-            const std::string& file = "", int line = 0, 
+    void log(LogLevel level, const std::string& message,
+            const std::string& file = "", int line = 0,
             const std::string& function = "") {
         if (level < log_level_) {
             return;
         }
-        
+
         std::string level_str;
         switch (level) {
             case LogLevel::DEBUG:
@@ -465,7 +466,7 @@ public:
                 level_str = "FATAL";
                 break;
         }
-        
+
         std::ostringstream oss;
         oss << "[" << level_str << "] " << message;
         if (!file.empty()) {
@@ -478,20 +479,20 @@ public:
             }
             oss << "]";
         }
-        
+
         // Log to console
         if (level >= LogLevel::WARNING) {
             std::cerr << oss.str() << std::endl;
         } else {
             std::cout << oss.str() << std::endl;
         }
-        
+
         // Log to file
         if (log_stream_.is_open()) {
             log_stream_ << oss.str() << std::endl;
         }
     }
-    
+
     /**
      * @brief Logs a debug message.
      *
@@ -503,7 +504,7 @@ public:
     void debug(const std::string& message, const std::string& file = "", int line = 0, const std::string& function = "") {
         log(LogLevel::DEBUG, message, file, line, function);
     }
-    
+
     /**
      * @brief Logs an info message.
      *
@@ -515,7 +516,7 @@ public:
     void info(const std::string& message, const std::string& file = "", int line = 0, const std::string& function = "") {
         log(LogLevel::INFO, message, file, line, function);
     }
-    
+
     /**
      * @brief Logs a warning message.
      *
@@ -527,7 +528,7 @@ public:
     void warning(const std::string& message, const std::string& file = "", int line = 0, const std::string& function = "") {
         log(LogLevel::WARNING, message, file, line, function);
     }
-    
+
     /**
      * @brief Logs an error message.
      *
@@ -539,7 +540,7 @@ public:
     void error(const std::string& message, const std::string& file = "", int line = 0, const std::string& function = "") {
         log(LogLevel::ERROR, message, file, line, function);
     }
-    
+
     /**
      * @brief Logs a fatal message.
      *
@@ -551,13 +552,13 @@ public:
     void fatal(const std::string& message, const std::string& file = "", int line = 0, const std::string& function = "") {
         log(LogLevel::FATAL, message, file, line, function);
     }
-    
+
 private:
     /**
      * @brief Constructs a new ErrorLogger object.
      */
     ErrorLogger() : log_level_(LogLevel::INFO) {}
-    
+
     /**
      * @brief Destructor for the ErrorLogger object.
      */
@@ -566,7 +567,7 @@ private:
             log_stream_.close();
         }
     }
-    
+
     LogLevel log_level_;      ///< The current log level
     std::string log_file_;    ///< The log file name
     std::ofstream log_stream_; ///< The log file stream

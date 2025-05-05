@@ -130,6 +130,21 @@ public:
      */
     void refine(const std::vector<bool>& refine_flags);
 
+    /**
+     * @brief Refine the mesh based on the given element indices.
+     *
+     * This method refines the mesh by subdividing the elements with the given indices.
+     * The refinement is performed in a way that maintains the mesh quality and
+     * ensures that the resulting mesh is conforming (no hanging nodes).
+     *
+     * @param element_indices A vector of element indices to refine
+     * @param max_refinement_level The maximum refinement level
+     * @return True if the mesh was refined, false otherwise
+     *
+     * @throws std::invalid_argument If any of the element indices are out of range
+     */
+    bool refine(const std::vector<int>& element_indices, int max_refinement_level = 3);
+
 #ifdef USE_MPI
     /**
      * @brief Refine the mesh in parallel using MPI.

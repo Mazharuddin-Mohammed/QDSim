@@ -58,7 +58,7 @@ public:
      *
      * @throws std::invalid_argument If the input parameters are invalid
      */
-    PoissonSolver(Mesh& mesh, double (*epsilon_r)(double, double), 
+    PoissonSolver(Mesh& mesh, double (*epsilon_r)(double, double),
                   double (*rho)(double, double, const Eigen::VectorXd&, const Eigen::VectorXd&));
     /**
      * @brief Solves the Poisson equation.
@@ -72,7 +72,73 @@ public:
      *
      * @throws std::runtime_error If the solver fails to converge
      */
+    void solve(double V_p, double V_n);
+
+    /**
+     * @brief Solves the Poisson equation with specified carrier concentrations.
+     *
+     * This method assembles the stiffness matrix and right-hand side vector,
+     * applies boundary conditions, and solves the resulting linear system to
+     * obtain the electrostatic potential. It uses the provided electron and
+     * hole concentrations to calculate the charge density.
+     *
+     * @param V_p Potential at the p-type boundary in volts (V)
+     * @param V_n Potential at the n-type boundary in volts (V)
+     * @param n The electron concentration at each node
+     * @param p The hole concentration at each node
+     *
+     * @throws std::runtime_error If the solver fails to converge
+     */
     void solve(double V_p, double V_n, const Eigen::VectorXd& n, const Eigen::VectorXd& p);
+
+    /**
+     * @brief Sets the potential values directly.
+     *
+     * This method allows setting the potential values directly, which is useful
+     * for implementing custom solvers or for testing.
+     *
+     * @param potential The potential values to set
+     */
+    void set_potential(const Eigen::VectorXd& potential);
+
+    /**
+     * @brief Updates the potential values and solves the Poisson equation.
+     *
+     * This method updates the potential values and then solves the Poisson equation
+     * with the updated values. It's useful for implementing self-consistent solvers
+     * that need to update the potential iteratively.
+     *
+     * @param potential The potential values to set
+     * @param V_p Potential at the p-type boundary in volts (V)
+     * @param V_n Potential at the n-type boundary in volts (V)
+     * @param n The electron concentration at each node
+     * @param p The hole concentration at each node
+     */
+    void update_and_solve(const Eigen::VectorXd& potential, double V_p, double V_n,
+                         const Eigen::VectorXd& n, const Eigen::VectorXd& p);
+
+    /**
+     * @brief Initializes the PoissonSolver with a new mesh and functions.
+     *
+     * This method reinitializes the PoissonSolver with a new mesh and functions.
+     * It's useful when the mesh has been refined or changed.
+     *
+     * @param mesh The mesh to use
+     * @param epsilon_r Function that returns the relative permittivity at a given position
+     * @param rho Function that returns the charge density at a given position
+     */
+    void initialize(Mesh& mesh, double (*epsilon_r)(double, double),
+                   double (*rho)(double, double, const Eigen::VectorXd&, const Eigen::VectorXd&));
+
+    /**
+     * @brief Sets the charge density values directly.
+     *
+     * This method allows setting the charge density values directly, which is useful
+     * for implementing custom solvers or for testing.
+     *
+     * @param charge_density The charge density values to set
+     */
+    void set_charge_density(const Eigen::VectorXd& charge_density);
 
     /**
      * @brief Gets the computed electrostatic potential.

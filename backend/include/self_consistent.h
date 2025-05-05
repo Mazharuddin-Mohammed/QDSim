@@ -99,6 +99,31 @@ public:
      */
     Eigen::Vector2d get_electric_field(double x, double y) const { return poisson.get_electric_field(x, y); }
 
+    /**
+     * @brief Sets the material properties for a heterojunction.
+     *
+     * This method sets the material properties for a heterojunction by defining
+     * different materials in different regions of the device. It allows for
+     * more complex device structures with multiple materials.
+     *
+     * @param materials Vector of materials
+     * @param regions Vector of functions that define the regions for each material
+     */
+    void set_heterojunction(const std::vector<Materials::Material>& materials,
+                           const std::vector<std::function<bool(double, double)>>& regions);
+
+    /**
+     * @brief Gets the material at a given position.
+     *
+     * This method returns the material at the given position based on the
+     * heterojunction regions defined by set_heterojunction.
+     *
+     * @param x The x-coordinate of the position
+     * @param y The y-coordinate of the position
+     * @return The material at the given position
+     */
+    Materials::Material get_material_at(double x, double y) const;
+
 public:
     // Convergence acceleration parameters
     double damping_factor;               ///< Damping factor for potential updates (0 < damping_factor <= 1)
@@ -120,6 +145,11 @@ private:
     double (*p_conc)(double, double, double, const Materials::Material&);  ///< Function for hole concentration
     double (*mu_n)(double, double, const Materials::Material&);  ///< Function for electron mobility
     double (*mu_p)(double, double, const Materials::Material&);  ///< Function for hole mobility
+
+    // Heterojunction properties
+    std::vector<Materials::Material> materials;  ///< Vector of materials for heterojunction
+    std::vector<std::function<bool(double, double)>> regions;  ///< Vector of region functions for heterojunction
+    bool has_heterojunction;  ///< Flag indicating whether a heterojunction is defined
 
     /**
      * @brief Apply damping to the potential update.
@@ -147,6 +177,22 @@ private:
     Eigen::VectorXd apply_anderson_acceleration(const Eigen::VectorXd& phi_old, const Eigen::VectorXd& phi_update);
 
     /**
+     * @brief Performs line search to find optimal step size.
+     *
+     * This function performs a line search to find the optimal step size
+     * for the Anderson acceleration. It uses a backtracking line search
+     * algorithm to find a step size that reduces the residual.
+     *
+     * @param phi_old The potential from the previous iteration
+     * @param phi_update The updated potential from the current iteration
+     * @param phi_accel The accelerated potential
+     * @return The optimal step size
+     */
+    double perform_line_search(const Eigen::VectorXd& phi_old,
+                              const Eigen::VectorXd& phi_update,
+                              const Eigen::VectorXd& phi_accel);
+
+    /**
      * @brief Initializes the carrier concentrations based on the doping concentrations.
      *
      * @param N_A The acceptor doping concentration
@@ -171,4 +217,52 @@ private:
      * @param V_n The voltage applied to the n-contact
      */
     void apply_boundary_conditions(double V_p, double V_n);
+
+    /**
+     * @brief Refines the mesh adaptively based on error estimators.
+     *
+     * This method refines the mesh adaptively based on error estimators
+     * for the potential and carrier concentrations. It identifies regions
+     * with high gradients or errors and refines the mesh in those regions.
+     *
+     * @param refinement_threshold The threshold for mesh refinement
+     * @param max_refinement_level The maximum refinement level
+     * @return True if the mesh was refined, false otherwise
+     */
+    bool refine_mesh_adaptively(double refinement_threshold, int max_refinement_level);
+
+    /**
+     * @brief Computes error estimators for mesh refinement.
+     *
+     * This method computes error estimators for mesh refinement based on
+     * the gradients of the potential and carrier concentrations. It identifies
+     * regions with high gradients or errors that need mesh refinement.
+     *
+     * @return Vector of error estimators for each element
+     */
+    Eigen::VectorXd compute_error_estimators() const;
+
+    /**
+     * @brief Computes the quantum correction to the potential.
+     *
+     * This method computes the quantum correction to the potential using
+     * the Bohm quantum potential approach. It accounts for quantum effects
+     * like tunneling and quantum confinement.
+     *
+     * @param n The electron concentration
+     * @param p The hole concentration
+     * @return The quantum correction to the potential
+     */
+    Eigen::VectorXd compute_quantum_correction(const Eigen::VectorXd& n, const Eigen::VectorXd& p) const;
+
+    /**
+     * @brief Computes the tunneling current.
+     *
+     * This method computes the tunneling current using the WKB approximation.
+     * It accounts for band-to-band tunneling and trap-assisted tunneling.
+     *
+     * @param E_field The electric field
+     * @return The tunneling current
+     */
+    Eigen::VectorXd compute_tunneling_current(const std::vector<Eigen::Vector2d>& E_field) const;
 };

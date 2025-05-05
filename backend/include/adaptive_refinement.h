@@ -17,6 +17,8 @@
 #include <Eigen/Dense>
 #include <vector>
 #include <functional>
+#include <set>
+#include <limits>
 
 /**
  * @enum RefinementStrategy
@@ -106,8 +108,6 @@ public:
 
 private:
     Mesh& mesh;                          ///< Reference to the mesh
-    ErrorEstimator error_estimator;      ///< Error estimator
-    MeshQuality mesh_quality;            ///< Mesh quality control
     std::vector<double> error_indicators; ///< Error indicators from the last refinement
     double global_error_norm;            ///< Global error norm from the last refinement
 
