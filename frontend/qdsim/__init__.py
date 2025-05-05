@@ -19,7 +19,44 @@ try:
     PoissonSolver = qdsim_cpp.PoissonSolver
     FEMSolver = qdsim_cpp.FEMSolver
     EigenSolver = qdsim_cpp.EigenSolver
+    # Try to import FullPoissonDriftDiffusionSolver if available
+    try:
+        FullPoissonDriftDiffusionSolver = qdsim_cpp.FullPoissonDriftDiffusionSolver
+    except AttributeError:
+        print("Warning: FullPoissonDriftDiffusionSolver not available in C++ module. Using Python fallback.")
+        from .python_full_poisson_dd_solver import PythonFullPoissonDriftDiffusionSolver
+        FullPoissonDriftDiffusionSolver = PythonFullPoissonDriftDiffusionSolver
+    # AdaptiveMesh is imported from adaptive_mesh.py
+    # SchrodingerSolver is accessed through create_schrodinger_solver
+    try:
+        SchrodingerSolver = qdsim_cpp.SchrodingerSolver
+    except AttributeError:
+        print("Warning: SchrodingerSolver not available in C++ module. Using Python fallback.")
+        from .python_schrodinger_solver import PythonSchrodingerSolver
+        SchrodingerSolver = PythonSchrodingerSolver
+
     Materials = qdsim_cpp
+
+    # Create a function to create a SchrodingerSolver
+    def create_schrodinger_solver(mesh, potential_function, m_eff=0.067, use_gpu=False):
+        """
+        Create a SchrodingerSolver.
+
+        Args:
+            mesh: The mesh to use for the simulation
+            potential_function: Function that returns the potential at a given position
+            m_eff: Effective mass (in units of m0)
+            use_gpu: Whether to use GPU acceleration
+
+        Returns:
+            A SchrodingerSolver object
+        """
+        try:
+            return qdsim_cpp.create_schrodinger_solver(mesh, lambda x, y: m_eff, potential_function, use_gpu)
+        except (AttributeError, TypeError):
+            # Fallback to a Python implementation
+            print("Warning: SchrodingerSolver C++ implementation not available. Using Python fallback.")
+            return SchrodingerSolver(mesh, potential_function)
 
 except ImportError as e:
     print(f"Warning: Could not import C++ extension: {e}. Make sure it's built and in the Python path.")
@@ -28,6 +65,9 @@ except ImportError as e:
     PoissonSolver = None
     FEMSolver = None
     EigenSolver = None
+    FullPoissonDriftDiffusionSolver = None
+    # AdaptiveMesh is imported from adaptive_mesh.py
+    SchrodingerSolver = None
     Materials = None
 
 from .config import Config

@@ -391,7 +391,7 @@ class SelfConsistentPNJunction(PNJunction):
     Class for self-consistent P-N junction modeling.
 
     This class extends the PNJunction class with self-consistent
-    solution of the Poisson-Boltzmann equation.
+    solution of the Poisson equation using a numerical solver.
     """
 
     def __init__(self, config):
@@ -403,110 +403,66 @@ class SelfConsistentPNJunction(PNJunction):
         """
         super().__init__(config)
 
+        # Import the Poisson solver
+        from qdsim.poisson_solver import PoissonSolver1D
+
         # Discretization parameters
         self.nx = 1001  # Number of points in x-direction
         self.x_min = config.junction_position - 3 * self.W_p  # Minimum x-coordinate
         self.x_max = config.junction_position + 3 * self.W_n  # Maximum x-coordinate
-        self.dx = (self.x_max - self.x_min) / (self.nx - 1)  # Grid spacing
+
+        # Initialize the Poisson solver
+        self.poisson_solver = PoissonSolver1D(self.x_min, self.x_max, self.nx, self.epsilon_r)
+
+        # Set boundary conditions
+        self.poisson_solver.set_boundary_conditions(0, -self.V_total)
 
         # Initialize potential and carrier concentrations
-        self.x_grid = np.linspace(self.x_min, self.x_max, self.nx)
+        self.x_grid = self.poisson_solver.x
         self.V_grid = np.zeros(self.nx)
-        self.n_grid = np.zeros(self.nx)
-        self.p_grid = np.zeros(self.nx)
+        self.E_grid = np.zeros(self.nx)
 
-        # Initialize with analytical solution
-        self.initialize_analytical()
+        # Solve Poisson equation with fixed charge density (depletion approximation)
+        self.solve_poisson_depletion()
 
-        # Solve self-consistently
-        self.solve_self_consistent()
-
-    def initialize_analytical(self):
+    def solve_poisson_depletion(self):
         """
-        Initialize the potential and carrier concentrations with analytical solution.
+        Solve the Poisson equation using the depletion approximation.
+
+        This method calculates the potential by solving Poisson's equation
+        with a fixed charge density based on the depletion approximation.
         """
+        # Calculate charge density using depletion approximation
+        rho = np.zeros(self.nx)
+
         for i, x in enumerate(self.x_grid):
-            # Potential
-            self.V_grid[i] = self.potential(x, 0) / self.q
-
-            # Carrier concentrations
-            self.n_grid[i] = self.electron_concentration(x, 0)
-            self.p_grid[i] = self.hole_concentration(x, 0)
-
-    def poisson_equation(self, V):
-        """
-        Poisson equation for the electrostatic potential.
-
-        Args:
-            V: Potential array (V)
-
-        Returns:
-            Residual of the Poisson equation
-        """
-        # Initialize residual
-        residual = np.zeros_like(V)
-
-        # Interior points
-        for i in range(1, self.nx - 1):
-            # Laplacian of V
-            laplacian = (V[i+1] - 2*V[i] + V[i-1]) / self.dx**2
-
-            # Charge density
-            x = self.x_grid[i]
+            # Distance from junction
             d = x - self.junction_position
 
+            # Charge density in depletion approximation
             if d < -self.W_p:
-                # P-side outside depletion region
-                n = self.n_i**2 / self.N_A
-                p = self.N_A
+                # P-side outside depletion region (charge neutrality)
+                rho[i] = 0
             elif d > self.W_n:
-                # N-side outside depletion region
-                n = self.N_D
-                p = self.n_i**2 / self.N_D
+                # N-side outside depletion region (charge neutrality)
+                rho[i] = 0
+            elif d < 0:
+                # P-side depletion region (ionized acceptors)
+                rho[i] = -self.q * self.N_A
             else:
-                # Inside depletion region
-                n = self.n_i * np.exp(self.q * V[i] / (self.k_B * self.T))
-                p = self.n_i * np.exp(-self.q * V[i] / (self.k_B * self.T))
+                # N-side depletion region (ionized donors)
+                rho[i] = self.q * self.N_D
 
-            # Charge density
-            rho = self.q * (p - n + self.N_D * (d > 0) - self.N_A * (d < 0))
+        # Set charge density in Poisson solver
+        self.poisson_solver.set_charge_density(rho)
 
-            # Poisson equation
-            residual[i] = laplacian - rho / (self.epsilon_0 * self.epsilon_r)
+        # Solve Poisson equation
+        self.V_grid = self.poisson_solver.solve()
 
-        # Boundary conditions
-        residual[0] = V[0]  # V = 0 at left boundary
-        residual[-1] = V[-1] + self.V_total  # V = -V_total at right boundary
+        # Calculate electric field
+        self.E_grid = self.poisson_solver.get_electric_field()
 
-        return residual
-
-    def solve_self_consistent(self):
-        """
-        Solve the Poisson equation self-consistently.
-        """
-        # Solve the Poisson equation
-        V_solution = fsolve(self.poisson_equation, self.V_grid)
-
-        # Update the potential
-        self.V_grid = V_solution
-
-        # Update carrier concentrations
-        for i, x in enumerate(self.x_grid):
-            # Carrier concentrations
-            d = x - self.junction_position
-
-            if d < -self.W_p:
-                # P-side outside depletion region
-                self.n_grid[i] = self.n_i**2 / self.N_A
-                self.p_grid[i] = self.N_A
-            elif d > self.W_n:
-                # N-side outside depletion region
-                self.n_grid[i] = self.N_D
-                self.p_grid[i] = self.n_i**2 / self.N_D
-            else:
-                # Inside depletion region
-                self.n_grid[i] = self.n_i * np.exp(self.q * self.V_grid[i] / (self.k_B * self.T))
-                self.p_grid[i] = self.n_i * np.exp(-self.q * self.V_grid[i] / (self.k_B * self.T))
+        print(f"Solved Poisson equation with depletion approximation")
 
     def potential_interpolated(self, x, y):
         """
@@ -525,15 +481,111 @@ class SelfConsistentPNJunction(PNJunction):
             return super().potential(x, y)
 
         # Find the grid indices
-        i = int((x - self.x_min) / self.dx)
+        i = int((x - self.x_min) / (self.x_max - self.x_min) * (self.nx - 1))
         i = max(0, min(i, self.nx - 2))
 
         # Linear interpolation
-        alpha = (x - self.x_grid[i]) / self.dx
+        dx = self.x_grid[i+1] - self.x_grid[i]
+        alpha = (x - self.x_grid[i]) / dx
         V = (1 - alpha) * self.V_grid[i] + alpha * self.V_grid[i+1]
 
         # Convert from V to J
         return V * self.q
+
+    def electron_concentration(self, x, y):
+        """
+        Calculate the electron concentration at a given position.
+
+        Args:
+            x: x-coordinate (m)
+            y: y-coordinate (m)
+
+        Returns:
+            Electron concentration (m^-3)
+        """
+        # Get the potential in V
+        V = self.potential_interpolated(x, y) / self.q
+
+        # Distance from junction
+        d = x - self.junction_position
+
+        # Electron concentration
+        if d < -self.W_p:
+            # P-side outside depletion region
+            n = self.n_i**2 / self.N_A
+        elif d > self.W_n:
+            # N-side outside depletion region
+            n = self.N_D
+        elif d < 0:
+            # P-side depletion region
+            n = self.n_i**2 / self.N_A * np.exp(self.q * V / (self.k_B * self.T))
+        else:
+            # N-side depletion region
+            n = self.N_D * np.exp(-(self.V_total + V) * self.q / (self.k_B * self.T))
+
+        return n
+
+    def hole_concentration(self, x, y):
+        """
+        Calculate the hole concentration at a given position.
+
+        Args:
+            x: x-coordinate (m)
+            y: y-coordinate (m)
+
+        Returns:
+            Hole concentration (m^-3)
+        """
+        # Get the potential in V
+        V = self.potential_interpolated(x, y) / self.q
+
+        # Distance from junction
+        d = x - self.junction_position
+
+        # Hole concentration
+        if d < -self.W_p:
+            # P-side outside depletion region
+            p = self.N_A
+        elif d > self.W_n:
+            # N-side outside depletion region
+            p = self.n_i**2 / self.N_D
+        elif d < 0:
+            # P-side depletion region
+            p = self.N_A * np.exp(-V * self.q / (self.k_B * self.T))
+        else:
+            # N-side depletion region
+            p = self.n_i**2 / self.N_D * np.exp((self.V_total + V) * self.q / (self.k_B * self.T))
+
+        return p
+
+    def electric_field_interpolated(self, x, y):
+        """
+        Interpolate the electric field at a given position.
+
+        Args:
+            x: x-coordinate (m)
+            y: y-coordinate (m)
+
+        Returns:
+            Interpolated electric field (V/m)
+        """
+        # Check if x is within the grid
+        if x < self.x_min or x > self.x_max:
+            # Use analytical solution outside the grid
+            return super().electric_field(x, y)[0]
+
+        # Find the grid indices
+        i = int((x - self.x_min) / (self.x_max - self.x_min) * (self.nx - 1))
+        i = max(0, min(i, self.nx - 2))
+
+        # Linear interpolation
+        dx = self.x_grid[i+1] - self.x_grid[i]
+        alpha = (x - self.x_grid[i]) / dx
+        E = (1 - alpha) * self.E_grid[i] + alpha * self.E_grid[i+1]
+
+        return np.array([E, 0])
+
+
 
     def electron_concentration_interpolated(self, x, y):
         """
@@ -552,11 +604,12 @@ class SelfConsistentPNJunction(PNJunction):
             return super().electron_concentration(x, y)
 
         # Find the grid indices
-        i = int((x - self.x_min) / self.dx)
+        i = int((x - self.x_min) / (self.x_max - self.x_min) * (self.nx - 1))
         i = max(0, min(i, self.nx - 2))
 
         # Linear interpolation
-        alpha = (x - self.x_grid[i]) / self.dx
+        dx = self.x_grid[i+1] - self.x_grid[i]
+        alpha = (x - self.x_grid[i]) / dx
         n = (1 - alpha) * self.n_grid[i] + alpha * self.n_grid[i+1]
 
         return n
@@ -578,11 +631,39 @@ class SelfConsistentPNJunction(PNJunction):
             return super().hole_concentration(x, y)
 
         # Find the grid indices
-        i = int((x - self.x_min) / self.dx)
+        i = int((x - self.x_min) / (self.x_max - self.x_min) * (self.nx - 1))
         i = max(0, min(i, self.nx - 2))
 
         # Linear interpolation
-        alpha = (x - self.x_grid[i]) / self.dx
+        dx = self.x_grid[i+1] - self.x_grid[i]
+        alpha = (x - self.x_grid[i]) / dx
         p = (1 - alpha) * self.p_grid[i] + alpha * self.p_grid[i+1]
 
         return p
+
+    def electric_field_interpolated(self, x, y):
+        """
+        Interpolate the electric field at a given position.
+
+        Args:
+            x: x-coordinate (m)
+            y: y-coordinate (m)
+
+        Returns:
+            Interpolated electric field (V/m)
+        """
+        # Check if x is within the grid
+        if x < self.x_min or x > self.x_max:
+            # Use analytical solution outside the grid
+            return super().electric_field(x, y)[0]
+
+        # Find the grid indices
+        i = int((x - self.x_min) / (self.x_max - self.x_min) * (self.nx - 1))
+        i = max(0, min(i, self.nx - 2))
+
+        # Linear interpolation
+        dx = self.x_grid[i+1] - self.x_grid[i]
+        alpha = (x - self.x_grid[i]) / dx
+        E = (1 - alpha) * self.E_grid[i] + alpha * self.E_grid[i+1]
+
+        return np.array([E, 0])

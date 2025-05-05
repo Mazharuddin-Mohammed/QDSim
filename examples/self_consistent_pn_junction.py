@@ -14,13 +14,14 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
+import qdsim_cpp as qdc
 
 # Add the frontend directory to the Python path
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '../frontend'))
 
 # Import the QDSim modules
 from qdsim.config import Config
-from qdsim.pn_junction import PNJunction, SelfConsistentPNJunction
+from qdsim.pn_junction import PNJunction
 
 def create_config():
     """Create a configuration with realistic physical parameters."""
@@ -54,6 +55,221 @@ def create_config():
 
     return config
 
+class CPPSelfConsistentPNJunction:
+    """C++ implementation of a self-consistent P-N junction model."""
+
+    def __init__(self, config):
+        """Initialize the C++ self-consistent P-N junction model."""
+        self.config = config
+
+        # Create a mesh
+        nx = 101
+        ny = 51
+        self.mesh = qdc.Mesh(config.Lx*1e9, config.Ly*1e9, nx, ny, 1)  # Convert to nm
+
+        # Define callback functions for the SelfConsistentSolver
+        def epsilon_r_callback(x, y):
+            return config.epsilon_r
+
+        def rho_callback(x, y, n, p):
+            # Charge density in C/nm^3
+            q = config.e_charge  # Elementary charge in C
+
+            # Doping contribution
+            rho_doping = q * (config.N_D if x > 0 else -config.N_A) * 1e-27  # Convert from m^-3 to nm^-3
+
+            # Carrier contribution
+            # We need to interpolate n and p at (x, y)
+            # For simplicity, we'll use the first values
+            n_val = n[0] if len(n) > 0 else 0.0
+            p_val = p[0] if len(p) > 0 else 0.0
+
+            rho_carriers = q * (p_val - n_val)
+
+            return rho_doping + rho_carriers
+
+        def n_conc_callback(x, y, phi, mat):
+            # Constants
+            kT = config.k_B * config.T / config.e_charge  # eV
+            q = config.e_charge  # Elementary charge in C
+
+            # Calculate Fermi levels
+            E_F_p = -mat.E_g + kT * np.log(mat.N_v / (config.N_A * 1e-27))  # Convert from m^-3 to nm^-3
+            E_F_n = -kT * np.log(mat.N_c / (config.N_D * 1e-27))  # Convert from m^-3 to nm^-3
+
+            # Calculate band edges
+            E_c = -q * phi - (E_F_p if x < 0 else E_F_n)
+
+            # Calculate electron concentration using Boltzmann statistics
+            n = mat.N_c * np.exp(-E_c / kT)
+
+            # Apply limits for numerical stability
+            n_min = 1e-15  # Minimum concentration (nm^-3)
+            n_max = 1e-3   # Maximum concentration (nm^-3)
+            return max(min(n, n_max), n_min)
+
+        def p_conc_callback(x, y, phi, mat):
+            # Constants
+            kT = config.k_B * config.T / config.e_charge  # eV
+            q = config.e_charge  # Elementary charge in C
+
+            # Calculate Fermi levels
+            E_F_p = -mat.E_g + kT * np.log(mat.N_v / (config.N_A * 1e-27))  # Convert from m^-3 to nm^-3
+            E_F_n = -kT * np.log(mat.N_c / (config.N_D * 1e-27))  # Convert from m^-3 to nm^-3
+
+            # Calculate band edges
+            E_c = -q * phi - (E_F_p if x < 0 else E_F_n)
+            E_v = E_c - mat.E_g
+
+            # Calculate hole concentration using Boltzmann statistics
+            p = mat.N_v * np.exp(E_v / kT)
+
+            # Apply limits for numerical stability
+            p_min = 1e-15  # Minimum concentration (nm^-3)
+            p_max = 1e-3   # Maximum concentration (nm^-3)
+            return max(min(p, p_max), p_min)
+
+        def mu_n_callback(x, y, mat):
+            return 8500.0  # Electron mobility in GaAs (cm^2/V·s)
+
+        def mu_p_callback(x, y, mat):
+            return 400.0   # Hole mobility in GaAs (cm^2/V·s)
+
+        # Create the SelfConsistentSolver
+        print("Creating C++ SelfConsistentSolver...")
+        self.solver = qdc.create_self_consistent_solver(
+            self.mesh, epsilon_r_callback, rho_callback,
+            n_conc_callback, p_conc_callback,
+            mu_n_callback, mu_p_callback
+        )
+
+        # Set convergence acceleration parameters
+        self.solver.damping_factor = 0.3
+        self.solver.anderson_history_size = 3
+
+        # Solve the self-consistent Poisson-drift-diffusion equations
+        print("Solving self-consistent equations...")
+        self.solver.solve(0.0, -config.V_r, config.N_A * 1e-27, config.N_D * 1e-27, 1e-6, 100)  # Convert from m^-3 to nm^-3
+
+        # Create interpolators
+        self.simple_mesh = qdc.create_simple_mesh(self.mesh)
+        self.interpolator = qdc.SimpleInterpolator(self.simple_mesh)
+
+        # Get the potential, electron concentration, and hole concentration
+        self.potential = self.solver.get_potential()
+        self.n = self.solver.get_n()
+        self.p = self.solver.get_p()
+
+        # Material properties for GaAs
+        self.mat = qdc.Material()
+        self.mat.N_c = 4.7e17  # Effective density of states in conduction band (nm^-3)
+        self.mat.N_v = 7.0e18  # Effective density of states in valence band (nm^-3)
+        self.mat.E_g = 1.424   # Band gap (eV)
+        self.mat.mu_n = 8500   # Electron mobility (cm^2/V·s)
+        self.mat.mu_p = 400    # Hole mobility (cm^2/V·s)
+        self.mat.epsilon_r = 12.9  # Relative permittivity
+
+        # Calculate Fermi levels
+        self.kT = config.k_B * config.T / config.e_charge  # eV
+        self.E_F_p = -self.mat.E_g + self.kT * np.log(self.mat.N_v / (config.N_A * 1e-27))
+        self.E_F_n = -self.kT * np.log(self.mat.N_c / (config.N_D * 1e-27))
+
+    def potential_interpolated(self, x, y):
+        """Get the potential at a given position."""
+        # Convert from m to nm
+        x_nm = x * 1e9
+        y_nm = y * 1e9
+
+        try:
+            # Interpolate the potential
+            potential_V = self.interpolator.interpolate(x_nm, y_nm, self.potential)
+
+            # Convert from V to J
+            return potential_V * self.config.e_charge
+        except:
+            return 0.0
+
+    def electron_concentration(self, x, y):
+        """Get the electron concentration at a given position."""
+        # Convert from m to nm
+        x_nm = x * 1e9
+        y_nm = y * 1e9
+
+        try:
+            # Interpolate the electron concentration
+            n_nm3 = self.interpolator.interpolate(x_nm, y_nm, self.n)
+
+            # Convert from nm^-3 to m^-3
+            return n_nm3 * 1e27
+        except:
+            return 0.0
+
+    def hole_concentration(self, x, y):
+        """Get the hole concentration at a given position."""
+        # Convert from m to nm
+        x_nm = x * 1e9
+        y_nm = y * 1e9
+
+        try:
+            # Interpolate the hole concentration
+            p_nm3 = self.interpolator.interpolate(x_nm, y_nm, self.p)
+
+            # Convert from nm^-3 to m^-3
+            return p_nm3 * 1e27
+        except:
+            return 0.0
+
+    def electric_field_interpolated(self, x, y):
+        """Get the electric field at a given position."""
+        # Convert from m to nm
+        x_nm = x * 1e9
+        y_nm = y * 1e9
+
+        # Calculate the electric field using finite differences
+        h = 1.0  # Step size in nm
+
+        try:
+            # Interpolate the potential at neighboring points
+            phi_center = self.interpolator.interpolate(x_nm, y_nm, self.potential)
+            phi_right = self.interpolator.interpolate(x_nm + h, y_nm, self.potential)
+            phi_left = self.interpolator.interpolate(x_nm - h, y_nm, self.potential)
+            phi_up = self.interpolator.interpolate(x_nm, y_nm + h, self.potential)
+            phi_down = self.interpolator.interpolate(x_nm, y_nm - h, self.potential)
+
+            # Calculate the electric field components
+            E_x = -(phi_right - phi_left) / (2.0 * h)
+            E_y = -(phi_up - phi_down) / (2.0 * h)
+
+            # Convert from V/nm to V/m
+            return np.array([E_x * 1e9, E_y * 1e9])
+        except:
+            return np.array([0.0, 0.0])
+
+    def conduction_band_edge(self, x, y):
+        """Get the conduction band edge at a given position."""
+        # Get the potential
+        phi = self.potential_interpolated(x, y)
+
+        # Calculate the conduction band edge
+        if x < self.config.junction_position:
+            # p-side
+            E_c = -self.config.chi - phi - self.E_F_p * self.config.e_charge
+        else:
+            # n-side
+            E_c = -self.config.chi - phi - self.E_F_n * self.config.e_charge
+
+        return E_c
+
+    def valence_band_edge(self, x, y):
+        """Get the valence band edge at a given position."""
+        # Get the conduction band edge
+        E_c = self.conduction_band_edge(x, y)
+
+        # Calculate the valence band edge
+        E_v = E_c - self.config.E_g
+
+        return E_v
+
 def compare_pn_junction_models(config):
     """Compare analytical and self-consistent P-N junction models."""
     # Create analytical P-N junction
@@ -61,8 +277,8 @@ def compare_pn_junction_models(config):
     analytical_pn = PNJunction(config)
 
     # Create self-consistent P-N junction
-    print("\nCreating self-consistent P-N junction model...")
-    self_consistent_pn = SelfConsistentPNJunction(config)
+    print("\nCreating C++ self-consistent P-N junction model...")
+    self_consistent_pn = CPPSelfConsistentPNJunction(config)
 
     # Print junction parameters
     print("\nP-N Junction Parameters:")
