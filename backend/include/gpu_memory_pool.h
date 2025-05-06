@@ -78,6 +78,73 @@ public:
      */
     std::string getStats() const;
 
+    /**
+     * @brief Sets the maximum pool size.
+     *
+     * @param size The maximum pool size in bytes
+     */
+    void setMaxPoolSize(size_t size);
+
+    /**
+     * @brief Sets the minimum block size.
+     *
+     * @param size The minimum block size in bytes
+     */
+    void setMinBlockSize(size_t size);
+
+    /**
+     * @brief Sets the maximum block size.
+     *
+     * @param size The maximum block size in bytes
+     */
+    void setMaxBlockSize(size_t size);
+
+    /**
+     * @brief Sets the growth factor for block sizes.
+     *
+     * @param factor The growth factor (must be > 1.0)
+     */
+    void setGrowthFactor(float factor);
+
+    /**
+     * @brief Sets the time-to-live for unused blocks.
+     *
+     * @param ttl The time-to-live in seconds
+     */
+    void setBlockTTL(std::chrono::seconds ttl);
+
+    /**
+     * @brief Prefetches memory blocks of specified sizes.
+     *
+     * This method prefetches memory blocks of specified sizes to avoid
+     * allocation overhead during runtime.
+     *
+     * @param sizes A vector of block sizes to prefetch
+     */
+    void prefetch(const std::vector<size_t>& sizes);
+
+    /**
+     * @brief Trims the memory pool to free unused memory.
+     *
+     * This method trims the memory pool by freeing memory blocks that
+     * have not been used for a specified time.
+     */
+    void trim();
+
+    /**
+     * @brief Gets the current memory usage.
+     *
+     * @return The current memory usage in bytes
+     */
+    size_t getCurrentUsage() const;
+
+    /**
+     * @brief Gets the total allocated memory.
+     *
+     * @return The total allocated memory in bytes
+     */
+    size_t getTotalAllocated() const;
+
 private:
     /**
      * @brief Constructs a new GPUMemoryPool object.
@@ -103,16 +170,56 @@ private:
         size_t size;
         bool in_use;
         std::string tag;
+        std::chrono::steady_clock::time_point last_used;
     };
 
-    std::vector<MemoryBlock> memory_blocks_;  ///< List of memory blocks
+    // Memory block size categories for faster lookup
+    enum class SizeCategory {
+        TINY,     // < 1 KB
+        SMALL,    // 1 KB - 64 KB
+        MEDIUM,   // 64 KB - 1 MB
+        LARGE,    // 1 MB - 16 MB
+        HUGE,     // 16 MB - 256 MB
+        ENORMOUS  // > 256 MB
+    };
+
+    // Convert size to category
+    SizeCategory getSizeCategory(size_t size) const;
+
+    // Get blocks by size category
+    std::vector<MemoryBlock*> getBlocksByCategory(SizeCategory category);
+
+    // Trim the pool to free memory when needed
+    void trimPool(size_t required_size);
+
+    // Check if we should grow the pool
+    bool shouldGrowPool(size_t required_size) const;
+
+    // Get available GPU memory
+    size_t getAvailableGPUMemory() const;
+
+    // Map of memory blocks by size category
+    std::unordered_map<SizeCategory, std::vector<MemoryBlock>> memory_blocks_by_category_;
+
+    // List of all memory blocks for iteration
+    std::vector<MemoryBlock*> all_memory_blocks_;
+
     mutable std::mutex mutex_;                ///< Mutex for thread safety
+
+    // Configuration
+    size_t max_pool_size_;                    ///< Maximum pool size in bytes
+    size_t min_block_size_;                   ///< Minimum block size in bytes
+    size_t max_block_size_;                   ///< Maximum block size in bytes
+    float growth_factor_;                     ///< Growth factor for block sizes
+    std::chrono::seconds block_ttl_;          ///< Time-to-live for unused blocks
 
     // Statistics
     size_t total_allocated_;                  ///< Total memory allocated
     size_t current_used_;                     ///< Current memory in use
     size_t allocation_count_;                 ///< Number of allocations
     size_t reuse_count_;                      ///< Number of reuses
+    size_t trim_count_;                       ///< Number of pool trims
+    size_t oom_count_;                        ///< Number of out-of-memory errors
 };
 
 #endif // USE_CUDA
