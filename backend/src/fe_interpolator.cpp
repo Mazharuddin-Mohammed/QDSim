@@ -55,7 +55,27 @@ double FEInterpolator::interpolate(double x, double y, const Eigen::VectorXd& fi
     // Find the element containing the point
     int elem_idx = findElement(x, y);
     if (elem_idx < 0) {
-        // Point is outside the mesh, return a default value
+        // Point is outside the mesh, find the nearest node and return its value
+        const auto& nodes = mesh.getNodes();
+        double min_dist = std::numeric_limits<double>::max();
+        int nearest_node = -1;
+
+        for (size_t i = 0; i < nodes.size(); ++i) {
+            double dx = x - nodes[i][0];
+            double dy = y - nodes[i][1];
+            double dist = dx*dx + dy*dy;  // No need to take square root for comparison
+
+            if (dist < min_dist) {
+                min_dist = dist;
+                nearest_node = i;
+            }
+        }
+
+        if (nearest_node >= 0 && nearest_node < field.size()) {
+            return field[nearest_node];
+        }
+
+        // Fallback if no valid nearest node is found
         return 0.0;
     }
 
@@ -145,7 +165,112 @@ double FEInterpolator::interpolateWithGradient(double x, double y, const Eigen::
     // Find the element containing the point
     int elem_idx = findElement(x, y);
     if (elem_idx < 0) {
-        // Point is outside the mesh, return a default value
+        // Point is outside the mesh, find the nearest node and estimate gradient
+        const auto& nodes = mesh.getNodes();
+        double min_dist = std::numeric_limits<double>::max();
+        int nearest_node = -1;
+
+        for (size_t i = 0; i < nodes.size(); ++i) {
+            double dx = x - nodes[i][0];
+            double dy = y - nodes[i][1];
+            double dist = dx*dx + dy*dy;  // No need to take square root for comparison
+
+            if (dist < min_dist) {
+                min_dist = dist;
+                nearest_node = i;
+            }
+        }
+
+        if (nearest_node >= 0 && nearest_node < field.size()) {
+            // Find connected nodes to estimate gradient
+            std::vector<int> connected_nodes;
+
+            // For P1 elements, find elements containing the nearest node
+            if (element_order == 1) {
+                const auto& elements = mesh.getElements();
+                for (size_t e = 0; e < elements.size(); ++e) {
+                    const auto& elem = elements[e];
+                    for (int i = 0; i < 3; ++i) {
+                        if (elem[i] == nearest_node) {
+                            // Add other nodes in this element
+                            for (int j = 0; j < 3; ++j) {
+                                if (j != i && std::find(connected_nodes.begin(), connected_nodes.end(), elem[j]) == connected_nodes.end()) {
+                                    connected_nodes.push_back(elem[j]);
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+            } else if (element_order == 2) {
+                const auto& elements = mesh.getQuadraticElements();
+                for (size_t e = 0; e < elements.size(); ++e) {
+                    const auto& elem = elements[e];
+                    for (int i = 0; i < 6; ++i) {
+                        if (elem[i] == nearest_node) {
+                            // Add other nodes in this element
+                            for (int j = 0; j < 6; ++j) {
+                                if (j != i && std::find(connected_nodes.begin(), connected_nodes.end(), elem[j]) == connected_nodes.end()) {
+                                    connected_nodes.push_back(elem[j]);
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+            } else if (element_order == 3) {
+                const auto& elements = mesh.getCubicElements();
+                for (size_t e = 0; e < elements.size(); ++e) {
+                    const auto& elem = elements[e];
+                    for (int i = 0; i < 10; ++i) {
+                        if (elem[i] == nearest_node) {
+                            // Add other nodes in this element
+                            for (int j = 0; j < 10; ++j) {
+                                if (j != i && std::find(connected_nodes.begin(), connected_nodes.end(), elem[j]) == connected_nodes.end()) {
+                                    connected_nodes.push_back(elem[j]);
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Estimate gradient using connected nodes
+            if (!connected_nodes.empty()) {
+                grad_x = grad_y = 0.0;
+                double total_weight = 0.0;
+
+                for (int node : connected_nodes) {
+                    double dx = nodes[node][0] - nodes[nearest_node][0];
+                    double dy = nodes[node][1] - nodes[nearest_node][1];
+                    double dist = std::sqrt(dx*dx + dy*dy);
+
+                    if (dist > 1e-10) {  // Avoid division by zero
+                        double weight = 1.0 / dist;  // Weight by inverse distance
+                        double df = field[node] - field[nearest_node];
+
+                        // Project gradient along the direction to the connected node
+                        grad_x += weight * (df * dx / dist);
+                        grad_y += weight * (df * dy / dist);
+                        total_weight += weight;
+                    }
+                }
+
+                if (total_weight > 0.0) {
+                    grad_x /= total_weight;
+                    grad_y /= total_weight;
+                } else {
+                    grad_x = grad_y = 0.0;
+                }
+            } else {
+                grad_x = grad_y = 0.0;
+            }
+
+            return field[nearest_node];
+        }
+
+        // Fallback if no valid nearest node is found
         grad_x = grad_y = 0.0;
         return 0.0;
     }

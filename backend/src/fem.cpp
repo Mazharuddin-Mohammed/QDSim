@@ -152,6 +152,40 @@ void FEMSolver::assemble_matrices_serial() {
 
 #ifdef USE_MPI
 /**
+ * @brief Enables or disables MPI for parallel computations.
+ *
+ * This method allows enabling or disabling MPI at runtime. When enabled,
+ * the solver will use MPI for parallel matrix assembly and mesh refinement.
+ * When disabled, the solver will use serial implementations.
+ *
+ * The method also handles MPI initialization if needed.
+ *
+ * @param enable Whether to enable MPI
+ */
+void FEMSolver::enable_mpi(bool enable) {
+    // Only change the flag if the value is different
+    if (use_mpi != enable) {
+        use_mpi = enable;
+
+        // If enabling MPI, check if MPI is initialized
+        if (use_mpi) {
+            int initialized;
+            MPI_Initialized(&initialized);
+            if (!initialized) {
+                // Initialize MPI with thread support
+                int provided;
+                MPI_Init_thread(nullptr, nullptr, MPI_THREAD_MULTIPLE, &provided);
+
+                // Check if the requested thread support level was provided
+                if (provided < MPI_THREAD_MULTIPLE) {
+                    std::cerr << "Warning: MPI implementation does not support MPI_THREAD_MULTIPLE" << std::endl;
+                }
+            }
+        }
+    }
+}
+
+/**
  * @brief Assembles the Hamiltonian and mass matrices in parallel mode using MPI.
  *
  * This private method assembles the Hamiltonian and mass matrices in parallel mode
@@ -510,6 +544,174 @@ void FEMSolver::adapt_mesh(const Eigen::VectorXd& eigenvector, double threshold,
 
 
 /**
+ * @brief Maps a point from the reference element to the physical element.
+ *
+ * This method maps a point from the reference element (unit triangle) to the
+ * physical element using linear interpolation with barycentric coordinates.
+ *
+ * @param ref_point The point in the reference element
+ * @param nodes The nodes of the physical element
+ * @return Eigen::Vector2d The corresponding point in the physical element
+ */
+Eigen::Vector2d FEMSolver::map_reference_to_physical(const Eigen::Vector2d& ref_point,
+                                                   const std::vector<Eigen::Vector2d>& nodes) const {
+    // For a triangle, the mapping is linear using barycentric coordinates
+    double lambda1 = 1.0 - ref_point[0] - ref_point[1];
+    double lambda2 = ref_point[0];
+    double lambda3 = ref_point[1];
+
+    // Map using barycentric coordinates
+    return lambda1 * nodes[0] + lambda2 * nodes[1] + lambda3 * nodes[2];
+}
+
+/**
+ * @brief Evaluates the shape functions and their gradients at a point.
+ *
+ * This method evaluates the shape functions and their gradients at a point
+ * in the reference element.
+ *
+ * @param ref_point The point in the reference element
+ * @param shape_values Output parameter for the shape function values
+ * @param shape_gradients Output parameter for the shape function gradients
+ * @param nodes The nodes of the physical element
+ * @param order The order of the finite elements
+ */
+void FEMSolver::evaluate_shape_functions(const Eigen::Vector2d& ref_point,
+                                       std::vector<double>& shape_values,
+                                       std::vector<Eigen::Vector2d>& shape_gradients,
+                                       const std::vector<Eigen::Vector2d>& nodes,
+                                       int order) const {
+    // Barycentric coordinates
+    double lambda1 = 1.0 - ref_point[0] - ref_point[1];
+    double lambda2 = ref_point[0];
+    double lambda3 = ref_point[1];
+
+    // Evaluate shape functions based on element order
+    if (order == 1) {
+        // P1 elements (linear)
+        shape_values.resize(3);
+        shape_values[0] = lambda1;
+        shape_values[1] = lambda2;
+        shape_values[2] = lambda3;
+
+        // Gradients in reference element
+        std::vector<Eigen::Vector2d> ref_gradients(3);
+        ref_gradients[0] = Eigen::Vector2d(-1.0, -1.0);
+        ref_gradients[1] = Eigen::Vector2d(1.0, 0.0);
+        ref_gradients[2] = Eigen::Vector2d(0.0, 1.0);
+
+        // Map gradients to physical element
+        shape_gradients.resize(3);
+        map_gradients_to_physical(ref_gradients, shape_gradients, nodes);
+    } else if (order == 2) {
+        // P2 elements (quadratic)
+        shape_values.resize(6);
+
+        // Vertex nodes
+        shape_values[0] = lambda1 * (2.0 * lambda1 - 1.0);
+        shape_values[1] = lambda2 * (2.0 * lambda2 - 1.0);
+        shape_values[2] = lambda3 * (2.0 * lambda3 - 1.0);
+
+        // Edge nodes
+        shape_values[3] = 4.0 * lambda1 * lambda2;
+        shape_values[4] = 4.0 * lambda2 * lambda3;
+        shape_values[5] = 4.0 * lambda3 * lambda1;
+
+        // Gradients in reference element
+        std::vector<Eigen::Vector2d> ref_gradients(6);
+
+        // Vertex nodes
+        ref_gradients[0] = Eigen::Vector2d(-3.0 + 4.0 * lambda1, -3.0 + 4.0 * lambda1);
+        ref_gradients[1] = Eigen::Vector2d(4.0 * lambda2 - 1.0, 0.0);
+        ref_gradients[2] = Eigen::Vector2d(0.0, 4.0 * lambda3 - 1.0);
+
+        // Edge nodes
+        ref_gradients[3] = Eigen::Vector2d(4.0 * (1.0 - 2.0 * lambda1 - lambda2), -4.0 * lambda2);
+        ref_gradients[4] = Eigen::Vector2d(4.0 * lambda3, 4.0 * lambda2);
+        ref_gradients[5] = Eigen::Vector2d(-4.0 * lambda3, 4.0 * (1.0 - lambda1 - 2.0 * lambda3));
+
+        // Map gradients to physical element
+        shape_gradients.resize(6);
+        map_gradients_to_physical(ref_gradients, shape_gradients, nodes);
+    } else { // order == 3
+        // P3 elements (cubic)
+        shape_values.resize(10);
+
+        // Vertex nodes
+        shape_values[0] = 0.5 * lambda1 * (3.0 * lambda1 - 1.0) * (3.0 * lambda1 - 2.0);
+        shape_values[1] = 0.5 * lambda2 * (3.0 * lambda2 - 1.0) * (3.0 * lambda2 - 2.0);
+        shape_values[2] = 0.5 * lambda3 * (3.0 * lambda3 - 1.0) * (3.0 * lambda3 - 2.0);
+
+        // Edge nodes (2 per edge)
+        shape_values[3] = 4.5 * lambda1 * lambda2 * (3.0 * lambda1 - 1.0);
+        shape_values[4] = 4.5 * lambda1 * lambda2 * (3.0 * lambda2 - 1.0);
+
+        shape_values[5] = 4.5 * lambda2 * lambda3 * (3.0 * lambda2 - 1.0);
+        shape_values[6] = 4.5 * lambda2 * lambda3 * (3.0 * lambda3 - 1.0);
+
+        shape_values[7] = 4.5 * lambda3 * lambda1 * (3.0 * lambda3 - 1.0);
+        shape_values[8] = 4.5 * lambda3 * lambda1 * (3.0 * lambda1 - 1.0);
+
+        // Interior node
+        shape_values[9] = 27.0 * lambda1 * lambda2 * lambda3;
+
+        // Gradients in reference element
+        std::vector<Eigen::Vector2d> ref_gradients(10);
+
+        // Vertex nodes
+        ref_gradients[0] = Eigen::Vector2d(-9.0 * lambda1 * lambda1 + 9.0 * lambda1 - 1.0, -9.0 * lambda1 * lambda1 + 9.0 * lambda1 - 1.0);
+        ref_gradients[1] = Eigen::Vector2d(9.0 * lambda2 * lambda2 - 9.0 * lambda2 + 1.0, 0.0);
+        ref_gradients[2] = Eigen::Vector2d(0.0, 9.0 * lambda3 * lambda3 - 9.0 * lambda3 + 1.0);
+
+        // Edge nodes (2 per edge)
+        ref_gradients[3] = Eigen::Vector2d(4.5 * (3.0 * lambda1 - 1.0) * lambda2 + 4.5 * lambda1 * lambda2 * 3.0, 4.5 * lambda1 * (3.0 * lambda1 - 1.0));
+        ref_gradients[4] = Eigen::Vector2d(4.5 * lambda1 * (3.0 * lambda2 - 1.0) + 4.5 * lambda1 * lambda2 * 3.0, 4.5 * lambda1 * (3.0 * lambda2 - 1.0));
+
+        ref_gradients[5] = Eigen::Vector2d(4.5 * lambda3 * (3.0 * lambda2 - 1.0) + 4.5 * lambda2 * lambda3 * 3.0, 4.5 * lambda2 * (3.0 * lambda2 - 1.0));
+        ref_gradients[6] = Eigen::Vector2d(4.5 * lambda3 * (3.0 * lambda2 - 1.0), 4.5 * lambda2 * (3.0 * lambda3 - 1.0) + 4.5 * lambda2 * lambda3 * 3.0);
+
+        ref_gradients[7] = Eigen::Vector2d(4.5 * lambda3 * (3.0 * lambda3 - 1.0), 4.5 * lambda1 * (3.0 * lambda3 - 1.0) + 4.5 * lambda3 * lambda1 * 3.0);
+        ref_gradients[8] = Eigen::Vector2d(4.5 * lambda3 * (3.0 * lambda1 - 1.0) + 4.5 * lambda3 * lambda1 * 3.0, 4.5 * lambda1 * (3.0 * lambda1 - 1.0));
+
+        // Interior node
+        ref_gradients[9] = Eigen::Vector2d(27.0 * lambda2 * lambda3, 27.0 * lambda1 * lambda3);
+
+        // Map gradients to physical element
+        shape_gradients.resize(10);
+        map_gradients_to_physical(ref_gradients, shape_gradients, nodes);
+    }
+}
+
+/**
+ * @brief Maps gradients from the reference element to the physical element.
+ *
+ * This method maps gradients from the reference element to the physical element
+ * using the Jacobian of the transformation.
+ *
+ * @param ref_gradients The gradients in the reference element
+ * @param phys_gradients Output parameter for the gradients in the physical element
+ * @param nodes The nodes of the physical element
+ */
+void FEMSolver::map_gradients_to_physical(const std::vector<Eigen::Vector2d>& ref_gradients,
+                                        std::vector<Eigen::Vector2d>& phys_gradients,
+                                        const std::vector<Eigen::Vector2d>& nodes) const {
+    // Compute Jacobian matrix for mapping from reference to physical element
+    Eigen::Matrix2d J;
+    J(0, 0) = nodes[1][0] - nodes[0][0];
+    J(0, 1) = nodes[2][0] - nodes[0][0];
+    J(1, 0) = nodes[1][1] - nodes[0][1];
+    J(1, 1) = nodes[2][1] - nodes[0][1];
+
+    // Compute inverse of Jacobian
+    Eigen::Matrix2d J_inv = J.inverse();
+
+    // Map gradients
+    for (size_t i = 0; i < ref_gradients.size(); ++i) {
+        phys_gradients[i] = J_inv.transpose() * ref_gradients[i];
+    }
+}
+
+/**
  * @brief Assembles the element matrices for a single element.
  *
  * This private method assembles the Hamiltonian and mass matrices for a single element.
@@ -653,12 +855,26 @@ void FEMSolver::assemble_element_matrix(size_t e, Eigen::MatrixXcd& H_e, Eigen::
             {4.0 * 1.0, 0.0}                                                   // Edge 3-1
         };
     } else { // order == 3
-        // P3 shape function gradients in reference element (simplified)
+        // P3 shape function gradients in reference element
         ref_gradients.resize(10);
-        // These would be more complex for P3 elements - using placeholders
-        for (int i = 0; i < 10; ++i) {
-            ref_gradients[i] = Eigen::Vector2d::Zero();
-        }
+
+        // Vertex nodes
+        ref_gradients[0] = Eigen::Vector2d(-9.0 * lambda1 * lambda1 + 9.0 * lambda1 - 1.0, -9.0 * lambda1 * lambda1 + 9.0 * lambda1 - 1.0);
+        ref_gradients[1] = Eigen::Vector2d(9.0 * lambda2 * lambda2 - 9.0 * lambda2 + 1.0, 0.0);
+        ref_gradients[2] = Eigen::Vector2d(0.0, 9.0 * lambda3 * lambda3 - 9.0 * lambda3 + 1.0);
+
+        // Edge nodes (2 per edge)
+        ref_gradients[3] = Eigen::Vector2d(9.0 * lambda1 * (3.0 * lambda2 - 1.0) + 9.0 * lambda2 * (3.0 * lambda1 - 1.0), 9.0 * lambda1 * (3.0 * lambda2 - 1.0));
+        ref_gradients[4] = Eigen::Vector2d(9.0 * lambda1 * (3.0 * lambda2 - 1.0) + 9.0 * lambda2 * (3.0 * lambda1 - 1.0), 9.0 * lambda2 * (3.0 * lambda1 - 1.0));
+
+        ref_gradients[5] = Eigen::Vector2d(9.0 * lambda2 * (3.0 * lambda3 - 1.0), 9.0 * lambda2 * (3.0 * lambda3 - 1.0) + 9.0 * lambda3 * (3.0 * lambda2 - 1.0));
+        ref_gradients[6] = Eigen::Vector2d(9.0 * lambda3 * (3.0 * lambda2 - 1.0), 9.0 * lambda2 * (3.0 * lambda3 - 1.0) + 9.0 * lambda3 * (3.0 * lambda2 - 1.0));
+
+        ref_gradients[7] = Eigen::Vector2d(9.0 * lambda3 * (3.0 * lambda1 - 1.0), 9.0 * lambda3 * (3.0 * lambda1 - 1.0) + 9.0 * lambda1 * (3.0 * lambda3 - 1.0));
+        ref_gradients[8] = Eigen::Vector2d(9.0 * lambda3 * (3.0 * lambda1 - 1.0) + 9.0 * lambda1 * (3.0 * lambda3 - 1.0), 9.0 * lambda1 * (3.0 * lambda3 - 1.0));
+
+        // Interior node
+        ref_gradients[9] = Eigen::Vector2d(27.0 * lambda2 * lambda3, 27.0 * lambda1 * lambda3);
     }
 
     // Compute Jacobian matrix for mapping from reference to physical element
@@ -741,11 +957,10 @@ void FEMSolver::assemble_element_matrix(size_t e, Eigen::MatrixXcd& H_e, Eigen::
                 27.0 * lambda1 * lambda2 * lambda3                              // Center
             };
 
-            // For P3 elements, we would need more complex gradient calculations
-            // This is a simplified placeholder
+            // Transform gradients from reference to physical element
             shape_gradients.resize(10);
             for (int i = 0; i < 10; ++i) {
-                shape_gradients[i] = Eigen::Vector2d::Zero();
+                shape_gradients[i] = J_inv.transpose() * ref_gradients[i];
             }
         }
 

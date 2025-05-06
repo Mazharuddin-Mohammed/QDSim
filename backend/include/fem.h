@@ -144,6 +144,19 @@ public:
      */
     bool is_using_mpi() const { return use_mpi; }
 
+#ifdef USE_MPI
+    /**
+     * @brief Enables or disables MPI for parallel computations.
+     *
+     * This method allows enabling or disabling MPI at runtime. When enabled,
+     * the solver will use MPI for parallel matrix assembly and mesh refinement.
+     * When disabled, the solver will use serial implementations.
+     *
+     * @param enable Whether to enable MPI
+     */
+    void enable_mpi(bool enable);
+#endif
+
     /**
      * @brief Gets the finite element interpolator.
      *
@@ -187,6 +200,51 @@ private:
 
     /** @brief Flag to enable/disable interpolated potentials */
     bool use_interpolation;
+
+    /**
+     * @brief Maps a point from the reference element to the physical element.
+     *
+     * This method maps a point from the reference element (unit triangle) to the
+     * physical element using linear interpolation.
+     *
+     * @param ref_point The point in the reference element
+     * @param nodes The nodes of the physical element
+     * @return Eigen::Vector2d The corresponding point in the physical element
+     */
+    Eigen::Vector2d map_reference_to_physical(const Eigen::Vector2d& ref_point,
+                                            const std::vector<Eigen::Vector2d>& nodes) const;
+
+    /**
+     * @brief Evaluates the shape functions and their gradients at a point.
+     *
+     * This method evaluates the shape functions and their gradients at a point
+     * in the reference element.
+     *
+     * @param ref_point The point in the reference element
+     * @param shape_values Output parameter for the shape function values
+     * @param shape_gradients Output parameter for the shape function gradients
+     * @param nodes The nodes of the physical element
+     * @param order The order of the finite elements
+     */
+    void evaluate_shape_functions(const Eigen::Vector2d& ref_point,
+                                std::vector<double>& shape_values,
+                                std::vector<Eigen::Vector2d>& shape_gradients,
+                                const std::vector<Eigen::Vector2d>& nodes,
+                                int order) const;
+
+    /**
+     * @brief Maps gradients from the reference element to the physical element.
+     *
+     * This method maps gradients from the reference element to the physical element
+     * using the Jacobian of the transformation.
+     *
+     * @param ref_gradients The gradients in the reference element
+     * @param phys_gradients Output parameter for the gradients in the physical element
+     * @param nodes The nodes of the physical element
+     */
+    void map_gradients_to_physical(const std::vector<Eigen::Vector2d>& ref_gradients,
+                                 std::vector<Eigen::Vector2d>& phys_gradients,
+                                 const std::vector<Eigen::Vector2d>& nodes) const;
 
     /**
      * @brief Assembles the element matrices for a single element.
