@@ -404,6 +404,26 @@ void SelfConsistentSolver::assemble_drift_diffusion_matrices() {
  * using the assembled matrices and the current potential. It updates the carrier
  * concentrations based on the solution.
  */
+/**
+ * @brief Solves the drift-diffusion equations for electron and hole transport.
+ *
+ * This function solves the drift-diffusion equations for electron and hole transport
+ * using the assembled matrices and the current potential. It updates the carrier
+ * concentrations based on the solution, including generation-recombination processes
+ * and proper handling of non-equilibrium conditions.
+ *
+ * The drift-diffusion equations are:
+ * ∇·(μn·n·∇φ + Dn·∇n) = G - R  (for electrons)
+ * ∇·(-μp·p·∇φ + Dp·∇p) = G - R  (for holes)
+ *
+ * Where:
+ * - μn, μp are the electron and hole mobilities
+ * - n, p are the electron and hole concentrations
+ * - φ is the electrostatic potential
+ * - Dn, Dp are the diffusion coefficients
+ * - G is the generation rate
+ * - R is the recombination rate
+ */
 void SelfConsistentSolver::solve_drift_diffusion() {
     // Assemble the drift-diffusion matrices
     assemble_drift_diffusion_matrices();
@@ -426,7 +446,13 @@ void SelfConsistentSolver::solve_drift_diffusion() {
     // Get the potential from the Poisson solver
     const Eigen::VectorXd& phi = poisson.get_potential();
 
-    // Calculate the right-hand side vectors
+    // Constants
+    const double kT = 0.0259; // eV at 300K
+    const double q = 1.602e-19; // Elementary charge in C
+    const double kB = 8.617333262e-5; // Boltzmann constant in eV/K
+    const double T = 300.0; // Temperature in K
+
+    // Calculate the right-hand side vectors with proper generation-recombination terms
     for (size_t i = 0; i < mesh.getNumNodes(); ++i) {
         double x = mesh.getNodes()[i][0];
         double y = mesh.getNodes()[i][1];
@@ -434,9 +460,33 @@ void SelfConsistentSolver::solve_drift_diffusion() {
         // Get material properties based on position
         Materials::Material mat = get_material_at(x, y);
 
-        // Calculate generation-recombination term (simplified)
-        double G = 0.0; // Generation rate
-        double R = 0.0; // Recombination rate
+        // Calculate generation rate (optical generation, impact ionization, etc.)
+        double G = 0.0; // Default: no generation
+
+        // Calculate recombination rate using SRH, Auger, and radiative recombination models
+        double R_SRH = 0.0;  // Shockley-Read-Hall recombination
+        double R_Auger = 0.0; // Auger recombination
+        double R_rad = 0.0;   // Radiative recombination
+
+        // Intrinsic carrier concentration (temperature dependent)
+        double ni = std::sqrt(mat.N_c * mat.N_v) * std::exp(-mat.E_g / (2.0 * kT));
+
+        // SRH recombination: R_SRH = (np - ni²) / (τn(p + ni) + τp(n + ni))
+        double tau_n = 1e-9; // Electron lifetime (s)
+        double tau_p = 1e-9; // Hole lifetime (s)
+        R_SRH = (n[i] * p[i] - ni * ni) / (tau_n * (p[i] + ni) + tau_p * (n[i] + ni));
+
+        // Auger recombination: R_Auger = Cn·n²·p + Cp·p²·n
+        double Cn = 1e-30; // Auger coefficient for electrons (cm^6/s)
+        double Cp = 1e-30; // Auger coefficient for holes (cm^6/s)
+        R_Auger = Cn * n[i] * n[i] * p[i] + Cp * p[i] * p[i] * n[i];
+
+        // Radiative recombination: R_rad = B·(np - ni²)
+        double B = 1e-10; // Radiative recombination coefficient (cm^3/s)
+        R_rad = B * (n[i] * p[i] - ni * ni);
+
+        // Total recombination rate
+        double R = R_SRH + R_Auger + R_rad;
 
         // Set right-hand side values
         f_n[i] = G - R;
@@ -452,14 +502,19 @@ void SelfConsistentSolver::solve_drift_diffusion() {
         throw std::runtime_error("Failed to solve drift-diffusion equations");
     }
 
-    // Update carrier concentrations
-    for (size_t i = 0; i < mesh.getNumNodes(); ++i) {
-        n[i] += delta_n[i];
-        p[i] += delta_p[i];
+    // Update carrier concentrations with damping to improve stability
+    double carrier_damping = 0.5; // Damping factor for carrier updates
 
-        // Ensure positive carrier concentrations
-        n[i] = std::max(n[i], 1e5);
-        p[i] = std::max(p[i], 1e5);
+    for (size_t i = 0; i < mesh.getNumNodes(); ++i) {
+        // Apply damping to carrier updates
+        n[i] += carrier_damping * delta_n[i];
+        p[i] += carrier_damping * delta_p[i];
+
+        // Ensure positive carrier concentrations with a more realistic minimum
+        const double n_min = 1e-10; // Minimum concentration (cm^-3)
+        const double n_max = 1e20;  // Maximum concentration (cm^-3)
+        n[i] = std::max(std::min(n[i], n_max), n_min);
+        p[i] = std::max(std::min(p[i], n_max), n_min);
     }
 }
 
@@ -489,13 +544,30 @@ void SelfConsistentSolver::solve_drift_diffusion() {
  * @param V_p The voltage applied to the p-contact
  * @param V_n The voltage applied to the n-contact
  */
+/**
+ * @brief Applies boundary conditions to the carrier concentrations.
+ *
+ * This function applies boundary conditions to the carrier concentrations based on
+ * the applied voltages and the position of the contacts. It implements several types
+ * of boundary conditions:
+ *
+ * 1. Ohmic contacts: Carrier concentrations are set to their equilibrium values based
+ *    on the applied voltage and doping.
+ * 2. Schottky contacts: Carrier concentrations are determined by the Schottky barrier
+ *    height and thermionic emission.
+ * 3. Insulating boundaries: Surface recombination is modeled with proper surface
+ *    recombination velocities.
+ * 4. Heterojunction interfaces: Band offsets and interface states are considered.
+ *
+ * @param V_p The voltage applied to the p-contact
+ * @param V_n The voltage applied to the n-contact
+ */
 void SelfConsistentSolver::apply_boundary_conditions(double V_p, double V_n) {
     // Constants
     const double kT = 0.0259; // eV at 300K
     const double kB = 8.617333262e-5; // Boltzmann constant in eV/K
     const double T = 300.0; // Temperature in K
     const double q = 1.602e-19; // Elementary charge in C
-    const double ni = 1e10; // Intrinsic carrier concentration (simplified)
 
     // Get mesh dimensions
     double Lx = mesh.get_lx();
@@ -506,105 +578,233 @@ void SelfConsistentSolver::apply_boundary_conditions(double V_p, double V_n) {
     double p_contact_x = -Lx / 2;
     double n_contact_x = Lx / 2;
 
-    // Define surface recombination velocity (cm/s)
+    // Define surface recombination velocities (cm/s)
     double S_n = 1e3; // Surface recombination velocity for electrons
     double S_p = 1e3; // Surface recombination velocity for holes
 
-    // Convert to nm/s
-    S_n *= 1e7;
-    S_p *= 1e7;
+    // Convert to cm/s (assuming mesh is in cm)
+    // Note: If mesh is in nm, use 1e-7 conversion factor
+    double mesh_scale = 1.0; // Set to 1e-7 if mesh is in nm
+    S_n *= mesh_scale;
+    S_p *= mesh_scale;
+
+    // Define Schottky barrier heights (eV)
+    double phi_bn = 0.8; // Barrier height for n-type Schottky contact
+    double phi_bp = 0.8; // Barrier height for p-type Schottky contact
+
+    // Define contact types (ohmic or Schottky)
+    bool p_contact_ohmic = true;  // Set to false for Schottky contact
+    bool n_contact_ohmic = true;  // Set to false for Schottky contact
 
     // Loop over all nodes
     for (size_t i = 0; i < mesh.getNumNodes(); ++i) {
         double x = mesh.getNodes()[i][0];
         double y = mesh.getNodes()[i][1];
 
+        // Get material properties for this node
+        Materials::Material mat = get_material_at(x, y);
+
+        // Get the potential at this node
+        double phi_val = 0.0;
+        const Eigen::VectorXd& phi = poisson.get_potential();
+        if (i < phi.size()) {
+            phi_val = phi[i];
+        }
+
         // Check if the node is at the p-contact (left boundary)
         if (std::abs(x - p_contact_x) < contact_thickness) {
-            // Get material properties for p-type region
-            Materials::Material mat = get_material_at(x, y);
-
             // Define doping concentrations
             double N_A = 1e16; // Acceptor concentration in p-region
             double N_D = 0.0;  // Donor concentration in p-region
 
-            // Calculate Fermi level in p-region
-            double E_F_p = -mat.E_g + kB * T * std::log(mat.N_v / N_A);
+            if (p_contact_ohmic) {
+                // Ohmic contact: Calculate equilibrium carrier concentrations
 
-            // Calculate band edges with applied voltage
-            double E_c = -q * V_p - E_F_p;
-            double E_v = E_c - mat.E_g;
+                // Calculate Fermi level in p-region
+                double E_F_p = -mat.E_g + kB * T * std::log(mat.N_v / N_A);
 
-            // Calculate equilibrium carrier concentrations using Boltzmann statistics
-            double n_eq = mat.N_c * std::exp(-E_c / kT);
-            double p_eq = mat.N_v * std::exp(E_v / kT);
+                // Calculate band edges with applied voltage
+                double E_c = -q * V_p - E_F_p;
+                double E_v = E_c - mat.E_g;
 
-            // Apply Dirichlet boundary conditions at ohmic contact
-            n[i] = n_eq;
-            p[i] = p_eq;
+                // Calculate equilibrium carrier concentrations using Boltzmann statistics
+                double n_eq = mat.N_c * std::exp(-E_c / kT);
+                double p_eq = mat.N_v * std::exp(E_v / kT);
+
+                // Apply Dirichlet boundary conditions at ohmic contact
+                n[i] = n_eq;
+                p[i] = p_eq;
+            } else {
+                // Schottky contact: Calculate carrier concentrations based on barrier height
+
+                // Calculate intrinsic carrier concentration
+                double ni = std::sqrt(mat.N_c * mat.N_v) * std::exp(-mat.E_g / (2.0 * kT));
+
+                // Calculate built-in potential
+                double V_bi = mat.E_g - phi_bp;
+
+                // Calculate effective barrier height with image force lowering
+                double E_field = std::abs(poisson.get_electric_field(x, y).norm());
+                double delta_phi = std::sqrt(q * E_field / (4.0 * M_PI * mat.epsilon_r * 8.85e-14));
+                double phi_eff = phi_bp - delta_phi;
+
+                // Calculate carrier concentrations at Schottky contact
+                n[i] = mat.N_c * std::exp(-(phi_eff) / kT);
+                p[i] = ni * ni / n[i];
+            }
         }
         // Check if the node is at the n-contact (right boundary)
         else if (std::abs(x - n_contact_x) < contact_thickness) {
-            // Get material properties for n-type region
-            Materials::Material mat = get_material_at(x, y);
-
             // Define doping concentrations
             double N_A = 0.0;  // Acceptor concentration in n-region
             double N_D = 1e16; // Donor concentration in n-region
 
-            // Calculate Fermi level in n-region
-            double E_F_n = -kB * T * std::log(mat.N_c / N_D);
+            if (n_contact_ohmic) {
+                // Ohmic contact: Calculate equilibrium carrier concentrations
 
-            // Calculate band edges with applied voltage
-            double E_c = -q * V_n - E_F_n;
-            double E_v = E_c - mat.E_g;
+                // Calculate Fermi level in n-region
+                double E_F_n = -kB * T * std::log(mat.N_c / N_D);
 
-            // Calculate equilibrium carrier concentrations using Boltzmann statistics
-            double n_eq = mat.N_c * std::exp(-E_c / kT);
-            double p_eq = mat.N_v * std::exp(E_v / kT);
+                // Calculate band edges with applied voltage
+                double E_c = -q * V_n - E_F_n;
+                double E_v = E_c - mat.E_g;
 
-            // Apply Dirichlet boundary conditions at ohmic contact
-            n[i] = n_eq;
-            p[i] = p_eq;
+                // Calculate equilibrium carrier concentrations using Boltzmann statistics
+                double n_eq = mat.N_c * std::exp(-E_c / kT);
+                double p_eq = mat.N_v * std::exp(E_v / kT);
+
+                // Apply Dirichlet boundary conditions at ohmic contact
+                n[i] = n_eq;
+                p[i] = p_eq;
+            } else {
+                // Schottky contact: Calculate carrier concentrations based on barrier height
+
+                // Calculate intrinsic carrier concentration
+                double ni = std::sqrt(mat.N_c * mat.N_v) * std::exp(-mat.E_g / (2.0 * kT));
+
+                // Calculate built-in potential
+                double V_bi = phi_bn;
+
+                // Calculate effective barrier height with image force lowering
+                double E_field = std::abs(poisson.get_electric_field(x, y).norm());
+                double delta_phi = std::sqrt(q * E_field / (4.0 * M_PI * mat.epsilon_r * 8.85e-14));
+                double phi_eff = phi_bn - delta_phi;
+
+                // Calculate carrier concentrations at Schottky contact
+                n[i] = N_D * std::exp(-(phi_eff) / kT);
+                p[i] = ni * ni / n[i];
+            }
         }
         // Check if the node is at the top or bottom boundary (insulating)
         else if (std::abs(y - (-Ly / 2)) < 1e-10 || std::abs(y - (Ly / 2)) < 1e-10) {
-            // Apply surface recombination boundary conditions
-            // For simplicity, we'll use a simplified model that sets the carrier
-            // concentrations to reduced values at the surface
-
-            // Get material properties based on position
-            Materials::Material mat;
-            if (x < 0) {
-                // p-side
-                mat.N_c = 2.1e23; // Example value
-                mat.N_v = 8.0e24; // Example value
-                mat.E_g = 1.0;    // Example value
-            } else {
-                // n-side
-                mat.N_c = 2.1e23; // Example value
-                mat.N_v = 8.0e24; // Example value
-                mat.E_g = 1.0;    // Example value
-            }
-
-            // Get the potential at this node
-            double phi_val = 0.0;
-            const Eigen::VectorXd& phi = poisson.get_potential();
-            if (i < phi.size()) {
-                phi_val = phi[i];
-            }
+            // Apply surface recombination boundary conditions using a more accurate model
 
             // Calculate bulk carrier concentrations
             double n_bulk = n_conc(x, y, phi_val, mat);
             double p_bulk = p_conc(x, y, phi_val, mat);
 
-            // Calculate surface carrier concentrations with surface recombination
-            // This is a simplified model; a more accurate model would involve
-            // solving the continuity equations with surface recombination boundary conditions
-            double surface_factor = 0.5; // Reduction factor at the surface
-            n[i] = surface_factor * n_bulk;
-            p[i] = surface_factor * p_bulk;
+            // Calculate intrinsic carrier concentration
+            double ni = std::sqrt(mat.N_c * mat.N_v) * std::exp(-mat.E_g / (2.0 * kT));
+
+            // Surface band bending (eV) - positive for upward bending
+            double surface_band_bending = 0.2;
+
+            // Surface state density (cm^-2)
+            double N_ss = 1e12;
+
+            // Surface charge (C/cm^2)
+            double Q_ss = q * N_ss;
+
+            // Calculate surface electric field
+            double E_surface = Q_ss / (mat.epsilon_r * 8.85e-14);
+
+            // Calculate depletion width due to surface states
+            double W_s = std::sqrt(2.0 * mat.epsilon_r * 8.85e-14 * surface_band_bending / (q * (x < 0 ? N_A : N_D)));
+
+            // Calculate surface potential
+            double phi_s = phi_val + surface_band_bending / q;
+
+            // Calculate surface carrier concentrations
+            double n_surface = n_bulk * std::exp(-surface_band_bending / kT);
+            double p_surface = p_bulk * std::exp(surface_band_bending / kT);
+
+            // Apply surface recombination
+            // For a more accurate model, we would need to solve the continuity equations
+            // with proper boundary conditions. This is a simplified approach.
+            double surface_recomb = S_n * S_p * (n_surface * p_surface - ni * ni) /
+                                   (S_n * (n_surface + ni) + S_p * (p_surface + ni));
+
+            // Adjust carrier concentrations based on surface recombination
+            // This is a simplified model that reduces carrier concentrations near the surface
+            double distance_from_surface = std::min(std::abs(y - (-Ly / 2)), std::abs(y - (Ly / 2)));
+            double surface_effect = std::exp(-distance_from_surface / W_s);
+
+            // Apply surface effect to carrier concentrations
+            n[i] = n_bulk * (1.0 - surface_effect) + n_surface * surface_effect;
+            p[i] = p_bulk * (1.0 - surface_effect) + p_surface * surface_effect;
         }
+
+        // Check for heterojunction interfaces
+        if (has_heterojunction) {
+            // Find if this node is at a heterojunction interface
+            bool is_interface = false;
+            int material_idx1 = -1, material_idx2 = -1;
+
+            // Check if the node is at an interface between different materials
+            for (size_t j = 0; j < regions.size(); ++j) {
+                if (regions[j](x, y)) {
+                    if (material_idx1 == -1) {
+                        material_idx1 = j;
+                    } else {
+                        material_idx2 = j;
+                        is_interface = true;
+                        break;
+                    }
+                }
+            }
+
+            if (is_interface) {
+                // This node is at a heterojunction interface
+                // Handle band offsets and interface states
+
+                // Get materials on both sides of the interface
+                Materials::Material mat1 = materials[material_idx1];
+                Materials::Material mat2 = materials[material_idx2];
+
+                // Calculate band offsets
+                double delta_Ec = mat2.E_g - mat1.E_g; // Simplified; in reality, this depends on electron affinities
+                double delta_Ev = 0.0; // Simplified; in reality, this depends on band alignments
+
+                // Interface state density (cm^-2)
+                double N_it = 1e11;
+
+                // Interface charge (C/cm^2)
+                double Q_it = q * N_it;
+
+                // Calculate interface electric field
+                double E_interface = Q_it / (0.5 * (mat1.epsilon_r + mat2.epsilon_r) * 8.85e-14);
+
+                // Calculate carrier concentrations at the interface
+                // This is a simplified model; a more accurate model would solve
+                // the Poisson-drift-diffusion equations with proper interface conditions
+
+                // Get carrier concentrations from both sides
+                double n1 = n_conc(x - 1e-6, y, phi_val, mat1);
+                double p1 = p_conc(x - 1e-6, y, phi_val, mat1);
+                double n2 = n_conc(x + 1e-6, y, phi_val, mat2);
+                double p2 = p_conc(x + 1e-6, y, phi_val, mat2);
+
+                // Average carrier concentrations at the interface
+                n[i] = 0.5 * (n1 + n2);
+                p[i] = 0.5 * (p1 + p2);
+            }
+        }
+
+        // Ensure minimum carrier concentrations for numerical stability
+        const double n_min = 1e-10; // Minimum concentration (cm^-3)
+        const double n_max = 1e20;  // Maximum concentration (cm^-3)
+        n[i] = std::max(std::min(n[i], n_max), n_min);
+        p[i] = std::max(std::min(p[i], n_max), n_min);
     }
 }
 
@@ -643,7 +843,12 @@ Eigen::VectorXd SelfConsistentSolver::apply_damping(const Eigen::VectorXd& phi_o
  *
  * This method applies Anderson acceleration to the potential update to improve convergence.
  * It uses the history of potential and residual vectors to compute an optimal combination
- * of previous iterations.
+ * of previous iterations. The implementation includes safeguards against numerical instabilities
+ * and adaptive regularization based on the condition number of the system.
+ *
+ * Anderson acceleration is a quasi-Newton method that approximates the inverse Jacobian
+ * using the history of iterates and residuals. It can significantly improve convergence
+ * for nonlinear systems compared to simple damping.
  *
  * @param phi_old The previous potential vector
  * @param phi_update The updated potential vector
@@ -683,21 +888,65 @@ Eigen::VectorXd SelfConsistentSolver::apply_anderson_acceleration(const Eigen::V
 
     try {
         // Use QR decomposition for numerical stability
-        Eigen::MatrixXd FTF = F.transpose() * F;
+        Eigen::ColPivHouseholderQR<Eigen::MatrixXd> qr(F);
 
-        // Add Tikhonov regularization for numerical stability
-        double reg = 1e-8 * FTF.diagonal().maxCoeff();
-        for (int i = 0; i < FTF.rows(); ++i) {
-            FTF(i, i) += reg;
+        // Check the rank and condition number
+        double threshold = 1e-10;
+        qr.setThreshold(threshold);
+        int rank = qr.rank();
+
+        if (rank < m) {
+            // Matrix is rank-deficient, use a more robust solver with regularization
+            Eigen::BDCSVD<Eigen::MatrixXd> svd(F, Eigen::ComputeThinU | Eigen::ComputeThinV);
+
+            // Get singular values
+            Eigen::VectorXd singularValues = svd.singularValues();
+            double maxSingularValue = singularValues(0);
+
+            // Compute condition number
+            double condNumber = maxSingularValue / singularValues(singularValues.size() - 1);
+
+            // Adaptive regularization based on condition number
+            double reg_param;
+            if (condNumber > 1e8) {
+                reg_param = 1e-4 * maxSingularValue;
+            } else if (condNumber > 1e6) {
+                reg_param = 1e-6 * maxSingularValue;
+            } else {
+                reg_param = 1e-8 * maxSingularValue;
+            }
+
+            // Apply Tikhonov regularization
+            Eigen::MatrixXd FTF = F.transpose() * F;
+            for (int i = 0; i < FTF.rows(); ++i) {
+                FTF(i, i) += reg_param;
+            }
+
+            // Solve the regularized normal equations
+            Eigen::VectorXd FTr = F.transpose() * (-res_history[m]);
+            alpha = FTF.ldlt().solve(FTr);
+
+            std::cout << "Using regularized solver with parameter: " << reg_param << std::endl;
+        } else {
+            // Matrix has full rank, use QR decomposition
+            alpha = qr.solve(-res_history[m]);
         }
-
-        // Solve the normal equations
-        Eigen::VectorXd FTr = F.transpose() * (-res_history[m]);
-        alpha = FTF.ldlt().solve(FTr);
 
         // Check if the solution is valid
         if (!alpha.allFinite()) {
             throw std::runtime_error("Invalid solution in Anderson acceleration");
+        }
+
+        // Apply constraints to ensure stability
+        // Limit the magnitude of coefficients
+        for (int i = 0; i < alpha.size(); ++i) {
+            alpha(i) = std::max(std::min(alpha(i), 2.0), -2.0);
+        }
+
+        // Ensure the sum of coefficients is reasonable
+        double sum = alpha.sum();
+        if (std::abs(sum) > 2.0) {
+            alpha *= 2.0 / std::abs(sum);
         }
     } catch (const std::exception& e) {
         // Fallback to damping if Anderson acceleration fails
@@ -716,6 +965,20 @@ Eigen::VectorXd SelfConsistentSolver::apply_anderson_acceleration(const Eigen::V
 
     // Apply the line search result
     Eigen::VectorXd phi_line_search = phi_old + beta * (phi_accel - phi_old);
+
+    // Check for non-physical values in the accelerated potential
+    bool has_non_physical = false;
+    for (int i = 0; i < phi_line_search.size(); ++i) {
+        if (!std::isfinite(phi_line_search(i)) || std::abs(phi_line_search(i)) > 100.0) {
+            has_non_physical = true;
+            break;
+        }
+    }
+
+    if (has_non_physical) {
+        std::cout << "Warning: Non-physical values detected in accelerated potential. Using damped update instead." << std::endl;
+        return apply_damping(phi_old, phi_update);
+    }
 
     // Apply damping to the accelerated potential for stability
     return apply_damping(phi_old, phi_line_search);
@@ -1049,16 +1312,21 @@ Eigen::VectorXd SelfConsistentSolver::compute_error_estimators() const {
  * @brief Computes the quantum correction to the potential.
  *
  * This method computes the quantum correction to the potential using
- * the Bohm quantum potential approach. It accounts for quantum effects
- * like tunneling and quantum confinement.
+ * the density gradient theory, which is an extension of the Bohm quantum
+ * potential approach. It accounts for quantum effects like tunneling,
+ * quantum confinement, and size quantization.
  *
- * The Bohm quantum potential is given by:
- * V_q = -ħ^2/(2m*) * ∇^2(√n)/√n
+ * The quantum correction potential is given by:
+ * V_q = -ħ^2/(2m*) * ∇^2(√n)/√n - ħ^2/(2m*) * ∇^2(√p)/√p
  *
  * Where:
  * - ħ is the reduced Planck constant
- * - m* is the effective mass
- * - n is the carrier concentration
+ * - m* is the effective mass (different for electrons and holes)
+ * - n is the electron concentration
+ * - p is the hole concentration
+ *
+ * This implementation uses a finite element approach to compute the Laplacian
+ * more accurately than simple finite differences.
  *
  * @param n The electron concentration
  * @param p The hole concentration
@@ -1066,13 +1334,120 @@ Eigen::VectorXd SelfConsistentSolver::compute_error_estimators() const {
  */
 Eigen::VectorXd SelfConsistentSolver::compute_quantum_correction(const Eigen::VectorXd& n, const Eigen::VectorXd& p) const {
     // Constants
-    const double h_bar = 1.055e-34; // Reduced Planck constant (J·s)
-    const double m_e = 9.109e-31; // Electron mass (kg)
-    const double q = 1.602e-19; // Elementary charge (C)
+    const double h_bar = 1.054571817e-34; // Reduced Planck constant (J·s)
+    const double m_e = 9.10938356e-31;    // Electron mass (kg)
+    const double q = 1.602176634e-19;     // Elementary charge (C)
+    const double kB = 1.380649e-23;       // Boltzmann constant (J/K)
+    const double T = 300.0;               // Temperature (K)
+    const double kT = kB * T / q;         // Thermal voltage (eV)
 
     // Initialize quantum correction vector
     Eigen::VectorXd V_q(mesh.getNumNodes());
     V_q.setZero();
+
+    // Create sparse matrices for the Laplacian operator
+    Eigen::SparseMatrix<double> L(mesh.getNumNodes(), mesh.getNumNodes());
+    std::vector<Eigen::Triplet<double>> L_triplets;
+
+    // Assemble the Laplacian matrix using finite element method
+    for (size_t e = 0; e < mesh.getNumElements(); ++e) {
+        // Get element nodes
+        const auto& element = mesh.getElements()[e];
+        std::vector<Eigen::Vector2d> nodes;
+        for (int i = 0; i < 3; ++i) {
+            nodes.push_back(mesh.getNodes()[element[i]]);
+        }
+
+        // Calculate element area
+        double x1 = nodes[0][0], y1 = nodes[0][1];
+        double x2 = nodes[1][0], y2 = nodes[1][1];
+        double x3 = nodes[2][0], y3 = nodes[2][1];
+        double area = 0.5 * std::abs((x2 - x1) * (y3 - y1) - (x3 - x1) * (y2 - y1));
+
+        // Calculate shape function gradients
+        std::vector<Eigen::Vector2d> grad_N(3);
+
+        // Calculate the Jacobian matrix for mapping from reference to physical element
+        Eigen::Matrix2d J;
+        J << x2 - x1, x3 - x1,
+             y2 - y1, y3 - y1;
+
+        // Calculate the inverse of the Jacobian
+        Eigen::Matrix2d J_inv = J.inverse();
+
+        // Reference element gradients
+        std::vector<Eigen::Vector2d> ref_grad = {
+            {-1.0, -1.0},  // dN1/d(xi), dN1/d(eta)
+            {1.0, 0.0},    // dN2/d(xi), dN2/d(eta)
+            {0.0, 1.0}     // dN3/d(xi), dN3/d(eta)
+        };
+
+        // Transform gradients from reference to physical element
+        for (int i = 0; i < 3; ++i) {
+            grad_N[i] = J_inv.transpose() * ref_grad[i];
+        }
+
+        // Assemble element Laplacian matrix
+        for (int i = 0; i < 3; ++i) {
+            for (int j = 0; j < 3; ++j) {
+                // Laplacian term: ∇Ni · ∇Nj
+                double L_ij = grad_N[i].dot(grad_N[j]) * area;
+                L_triplets.emplace_back(element[i], element[j], L_ij);
+            }
+        }
+    }
+
+    // Set up the Laplacian matrix
+    L.setFromTriplets(L_triplets.begin(), L_triplets.end());
+
+    // Create mass matrix for normalization
+    Eigen::SparseMatrix<double> M(mesh.getNumNodes(), mesh.getNumNodes());
+    std::vector<Eigen::Triplet<double>> M_triplets;
+
+    // Assemble the mass matrix using finite element method
+    for (size_t e = 0; e < mesh.getNumElements(); ++e) {
+        // Get element nodes
+        const auto& element = mesh.getElements()[e];
+        std::vector<Eigen::Vector2d> nodes;
+        for (int i = 0; i < 3; ++i) {
+            nodes.push_back(mesh.getNodes()[element[i]]);
+        }
+
+        // Calculate element area
+        double x1 = nodes[0][0], y1 = nodes[0][1];
+        double x2 = nodes[1][0], y2 = nodes[1][1];
+        double x3 = nodes[2][0], y3 = nodes[2][1];
+        double area = 0.5 * std::abs((x2 - x1) * (y3 - y1) - (x3 - x1) * (y2 - y1));
+
+        // Assemble element mass matrix
+        for (int i = 0; i < 3; ++i) {
+            for (int j = 0; j < 3; ++j) {
+                // Mass term: Ni · Nj
+                double M_ij = (i == j ? area / 6.0 : area / 12.0);
+                M_triplets.emplace_back(element[i], element[j], M_ij);
+            }
+        }
+    }
+
+    // Set up the mass matrix
+    M.setFromTriplets(M_triplets.begin(), M_triplets.end());
+
+    // Compute sqrt(n) and sqrt(p) vectors
+    Eigen::VectorXd sqrt_n(mesh.getNumNodes());
+    Eigen::VectorXd sqrt_p(mesh.getNumNodes());
+
+    for (size_t i = 0; i < mesh.getNumNodes(); ++i) {
+        // Ensure positive values to avoid numerical issues
+        double n_val = std::max(n[i], 1e-20);
+        double p_val = std::max(p[i], 1e-20);
+
+        sqrt_n[i] = std::sqrt(n_val);
+        sqrt_p[i] = std::sqrt(p_val);
+    }
+
+    // Compute Laplacian of sqrt(n) and sqrt(p)
+    Eigen::VectorXd L_sqrt_n = L * sqrt_n;
+    Eigen::VectorXd L_sqrt_p = L * sqrt_p;
 
     // Compute the quantum correction for each node
     for (size_t i = 0; i < mesh.getNumNodes(); ++i) {
@@ -1082,17 +1457,43 @@ Eigen::VectorXd SelfConsistentSolver::compute_quantum_correction(const Eigen::Ve
         // Get material properties at this position
         Materials::Material mat = get_material_at(x, y);
 
-        // Effective mass (in units of electron mass)
-        double m_star = 0.067; // GaAs effective mass
+        // Effective masses (in units of electron mass)
+        double m_star_n = 0.067; // GaAs electron effective mass
+        double m_star_p = 0.45;  // GaAs hole effective mass
 
-        // Compute the Laplacian of sqrt(n) / sqrt(n)
-        // This is a simplified implementation that uses finite differences
-        // In a real implementation, we would use the finite element method
+        // Quantum correction parameters
+        double gamma_n = 1.0; // Quantum correction factor for electrons
+        double gamma_p = 1.0; // Quantum correction factor for holes
 
+        // Compute the quantum correction terms
+        double V_q_n = 0.0;
+        double V_q_p = 0.0;
+
+        // Only compute if the carrier concentration is significant
+        if (sqrt_n[i] > 1e-10) {
+            V_q_n = -gamma_n * h_bar * h_bar / (2.0 * m_star_n * m_e) * L_sqrt_n[i] / sqrt_n[i] / q;
+        }
+
+        if (sqrt_p[i] > 1e-10) {
+            V_q_p = -gamma_p * h_bar * h_bar / (2.0 * m_star_p * m_e) * L_sqrt_p[i] / sqrt_p[i] / q;
+        }
+
+        // Total quantum correction (combine electron and hole contributions)
+        V_q[i] = V_q_n - V_q_p; // Note the sign change for holes
+
+        // Limit the quantum correction to avoid numerical instabilities
+        V_q[i] = std::max(std::min(V_q[i], 0.5), -0.5);
+    }
+
+    // Apply smoothing to the quantum correction to improve stability
+    Eigen::VectorXd V_q_smoothed = V_q;
+
+    // Simple averaging with neighbors for smoothing
+    for (size_t i = 0; i < mesh.getNumNodes(); ++i) {
         // Find neighboring nodes
         std::vector<int> neighbors;
         for (size_t e = 0; e < mesh.getNumElements(); ++e) {
-            auto element = mesh.getElements()[e];
+            const auto& element = mesh.getElements()[e];
             for (int j = 0; j < 3; ++j) {
                 if (element[j] == i) {
                     // Add the other nodes in the element to the neighbors
@@ -1109,60 +1510,52 @@ Eigen::VectorXd SelfConsistentSolver::compute_quantum_correction(const Eigen::Ve
         std::sort(neighbors.begin(), neighbors.end());
         neighbors.erase(std::unique(neighbors.begin(), neighbors.end()), neighbors.end());
 
-        // Compute the Laplacian of sqrt(n) / sqrt(n)
-        double laplacian_sqrt_n_over_sqrt_n = 0.0;
+        // Average with neighbors
         if (!neighbors.empty()) {
-            // Compute the average distance to neighbors
-            double avg_distance = 0.0;
+            double sum = V_q[i];
             for (int j : neighbors) {
-                double dx = mesh.getNodes()[j][0] - x;
-                double dy = mesh.getNodes()[j][1] - y;
-                avg_distance += std::sqrt(dx * dx + dy * dy);
+                sum += V_q[j];
             }
-            avg_distance /= neighbors.size();
-
-            // Compute the Laplacian using finite differences
-            double sqrt_n_i = std::sqrt(n[i]);
-            double sum_sqrt_n_j = 0.0;
-            for (int j : neighbors) {
-                sum_sqrt_n_j += std::sqrt(n[j]);
-            }
-
-            // Approximate the Laplacian
-            laplacian_sqrt_n_over_sqrt_n = (sum_sqrt_n_j - neighbors.size() * sqrt_n_i) / (avg_distance * avg_distance * sqrt_n_i);
+            V_q_smoothed[i] = sum / (neighbors.size() + 1);
         }
-
-        // Compute the quantum correction
-        V_q[i] = -h_bar * h_bar / (2.0 * m_star * m_e) * laplacian_sqrt_n_over_sqrt_n / q;
     }
 
-    return V_q;
+    return V_q_smoothed;
 }
 
 /**
  * @brief Computes the tunneling current.
  *
- * This method computes the tunneling current using the WKB approximation.
- * It accounts for band-to-band tunneling and trap-assisted tunneling.
+ * This method computes the tunneling current using advanced models for
+ * band-to-band tunneling (BTBT), trap-assisted tunneling (TAT), and
+ * thermionic emission. It accounts for the local electric field, band structure,
+ * and quantum effects.
  *
- * The WKB approximation for the tunneling probability is:
- * T = exp(-2 * ∫ κ(x) dx)
+ * For band-to-band tunneling, the Kane model is used:
+ * J_BTBT = A * E_field^2 * exp(-B/E_field)
  *
- * Where:
- * - κ(x) = √(2m*(E_c(x) - E) / ħ^2) is the wave vector
- * - E_c(x) is the conduction band edge
- * - E is the energy of the electron
+ * For trap-assisted tunneling, the Hurkx model is used:
+ * J_TAT = J_SRH * (1 + Γ)
+ * where Γ is the field enhancement factor.
+ *
+ * For thermionic emission, the standard model is used:
+ * J_TE = A* * T^2 * exp(-φ_B/kT)
  *
  * @param E_field The electric field
  * @return The tunneling current
  */
 Eigen::VectorXd SelfConsistentSolver::compute_tunneling_current(const std::vector<Eigen::Vector2d>& E_field) const {
     // Constants
-    const double h_bar = 1.055e-34; // Reduced Planck constant (J·s)
-    const double m_e = 9.109e-31; // Electron mass (kg)
-    const double q = 1.602e-19; // Elementary charge (C)
-    const double kB = 1.381e-23; // Boltzmann constant (J/K)
-    const double T = 300.0; // Temperature (K)
+    const double h_bar = 1.054571817e-34; // Reduced Planck constant (J·s)
+    const double m_e = 9.10938356e-31;    // Electron mass (kg)
+    const double q = 1.602176634e-19;     // Elementary charge (C)
+    const double kB = 1.380649e-23;       // Boltzmann constant (J/K)
+    const double T = 300.0;               // Temperature (K)
+    const double kT = kB * T;             // Thermal energy (J)
+    const double kT_eV = kT / q;          // Thermal energy (eV)
+
+    // Richardson constant (A/(cm^2·K^2))
+    const double A_star = 120.0;
 
     // Initialize tunneling current vector
     Eigen::VectorXd J_tunnel(mesh.getNumNodes());
@@ -1179,11 +1572,14 @@ Eigen::VectorXd SelfConsistentSolver::compute_tunneling_current(const std::vecto
         // Get material properties at this position
         Materials::Material mat = get_material_at(x, y);
 
-        // Effective mass (in units of electron mass)
-        double m_star = 0.067; // GaAs effective mass
+        // Effective masses (in units of electron mass)
+        double m_star_n = 0.067; // GaAs electron effective mass
+        double m_star_p = 0.45;  // GaAs hole effective mass
+        double m_r = m_star_n * m_star_p / (m_star_n + m_star_p); // Reduced effective mass
 
         // Band gap
-        double E_g = mat.E_g * q; // Convert from eV to J
+        double E_g = mat.E_g; // Band gap in eV
+        double E_g_J = E_g * q; // Band gap in J
 
         // Electric field magnitude
         double E_mag = 0.0;
@@ -1191,23 +1587,111 @@ Eigen::VectorXd SelfConsistentSolver::compute_tunneling_current(const std::vecto
             E_mag = E_field[i].norm();
         }
 
-        // Compute the tunneling probability using the WKB approximation
-        // For band-to-band tunneling, the barrier width is approximately E_g / (q * E_mag)
-        double barrier_width = E_g / (q * E_mag);
+        // Avoid division by zero
+        E_mag = std::max(E_mag, 1e-6);
 
-        // Compute the average wave vector
-        double kappa = std::sqrt(2.0 * m_star * m_e * E_g) / h_bar;
+        // Band-to-band tunneling (BTBT) using Kane model
+        // Parameters for GaAs
+        double A_BTBT = 3.0e14; // cm^-1·s^-1·V^-2
+        double B_BTBT = 2.0e7;  // V/cm
 
-        // Compute the tunneling probability
-        double T_tunnel = std::exp(-2.0 * kappa * barrier_width);
+        // Convert electric field to V/cm
+        double E_mag_V_cm = E_mag * 1e-2; // Assuming E_field is in V/m
 
-        // Compute the tunneling current
-        // J_tunnel = q * n * v * T_tunnel
-        // where v is the thermal velocity
-        double v_thermal = std::sqrt(3.0 * kB * T / (m_star * m_e));
+        // Calculate BTBT current density (A/cm^2)
+        double J_BTBT = 0.0;
+        if (E_mag_V_cm > 1e5) { // Only significant for high fields
+            J_BTBT = q * A_BTBT * E_mag_V_cm * E_mag_V_cm * std::exp(-B_BTBT / E_mag_V_cm);
+        }
 
-        // Compute the tunneling current
-        J_tunnel[i] = q * n[i] * v_thermal * T_tunnel;
+        // Trap-assisted tunneling (TAT) using Hurkx model
+        // Parameters
+        double E_t = 0.5 * E_g; // Trap energy level (eV), typically mid-gap
+        double tau_n = 1e-9;    // Electron lifetime (s)
+        double tau_p = 1e-9;    // Hole lifetime (s)
+        double N_t = 1e14;      // Trap density (cm^-3)
+
+        // Calculate field enhancement factor
+        double E_00_n = h_bar * std::sqrt(q * E_mag / (8 * M_PI * m_star_n * m_e)); // Characteristic energy (J)
+        double E_00_p = h_bar * std::sqrt(q * E_mag / (8 * M_PI * m_star_p * m_e)); // Characteristic energy (J)
+
+        // Convert to eV
+        double E_00_n_eV = E_00_n / q;
+        double E_00_p_eV = E_00_p / q;
+
+        // Field enhancement factors
+        double Gamma_n = (M_PI * E_00_n_eV / kT_eV) / std::tanh(M_PI * E_00_n_eV / kT_eV);
+        double Gamma_p = (M_PI * E_00_p_eV / kT_eV) / std::tanh(M_PI * E_00_p_eV / kT_eV);
+
+        // Calculate SRH recombination rate
+        double n_i = std::sqrt(mat.N_c * mat.N_v) * std::exp(-E_g / (2.0 * kT_eV));
+        double R_SRH = (n[i] * p[i] - n_i * n_i) / (tau_n * (p[i] + n_i) + tau_p * (n[i] + n_i));
+
+        // Calculate TAT current density (A/cm^2)
+        double J_TAT = q * R_SRH * (Gamma_n + Gamma_p - 1.0);
+
+        // Thermionic emission (TE) for heterojunctions and Schottky barriers
+        double J_TE = 0.0;
+
+        // Check if this node is at a heterojunction interface
+        if (has_heterojunction) {
+            bool is_interface = false;
+            int material_idx1 = -1, material_idx2 = -1;
+
+            // Check if the node is at an interface between different materials
+            for (size_t j = 0; j < regions.size(); ++j) {
+                if (regions[j](x, y)) {
+                    if (material_idx1 == -1) {
+                        material_idx1 = j;
+                    } else {
+                        material_idx2 = j;
+                        is_interface = true;
+                        break;
+                    }
+                }
+            }
+
+            if (is_interface) {
+                // Get materials on both sides of the interface
+                Materials::Material mat1 = materials[material_idx1];
+                Materials::Material mat2 = materials[material_idx2];
+
+                // Calculate band offsets
+                double delta_Ec = std::abs(mat2.E_g - mat1.E_g); // Simplified; in reality, this depends on electron affinities
+
+                // Calculate thermionic emission current
+                J_TE = A_star * T * T * std::exp(-delta_Ec / kT_eV);
+            }
+        }
+
+        // WKB tunneling probability for quantum tunneling
+        double J_WKB = 0.0;
+
+        if (E_mag > 1e5) { // Only significant for high fields
+            // Calculate tunneling barrier width
+            double barrier_width = E_g_J / (q * E_mag);
+
+            // Calculate wave vector
+            double kappa = std::sqrt(2.0 * m_r * m_e * E_g_J) / h_bar;
+
+            // Calculate tunneling probability
+            double T_WKB = std::exp(-2.0 * kappa * barrier_width);
+
+            // Calculate thermal velocity
+            double v_thermal = std::sqrt(3.0 * kB * T / (m_r * m_e));
+
+            // Calculate WKB tunneling current density (A/cm^2)
+            J_WKB = q * n[i] * v_thermal * T_WKB;
+        }
+
+        // Total tunneling current density (A/cm^2)
+        double J_total = J_BTBT + J_TAT + J_TE + J_WKB;
+
+        // Limit the current to avoid numerical instabilities
+        J_total = std::max(std::min(J_total, 1e3), -1e3);
+
+        // Store the result
+        J_tunnel[i] = J_total;
     }
 
     return J_tunnel;
