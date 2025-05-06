@@ -619,43 +619,317 @@ void SelfConsistentSolver::update_quasi_fermi_potentials() {
 }
 
 /**
- * @brief Calculates the built-in potential of the P-N junction.
+ * @brief Calculates the built-in potential of the P-N junction with temperature dependence.
  *
  * This method calculates the built-in potential of the P-N junction
- * based on the doping concentrations and material properties. The
- * built-in potential is the potential difference between the p-side
- * and the n-side in thermal equilibrium.
+ * based on the doping concentrations and material properties, with proper
+ * temperature dependence. The built-in potential is the potential difference
+ * between the p-side and the n-side in thermal equilibrium.
  *
  * The built-in potential is given by:
  * V_bi = (kT/q) * ln(N_A * N_D / (n_i^2))
  *
  * Where:
- * - kT is the thermal voltage
+ * - kT is the thermal voltage (temperature dependent)
  * - q is the elementary charge
  * - N_A is the acceptor doping concentration
  * - N_D is the donor doping concentration
- * - n_i is the intrinsic carrier concentration
+ * - n_i is the intrinsic carrier concentration (temperature dependent)
  *
  * @param N_A The acceptor doping concentration
  * @param N_D The donor doping concentration
+ * @param T The temperature in Kelvin (default: 300K)
  * @return The built-in potential in volts
  */
-double SelfConsistentSolver::calculate_built_in_potential(double N_A, double N_D) const {
+double SelfConsistentSolver::calculate_built_in_potential(double N_A, double N_D, double T) const {
     // Constants
-    const double kT = 0.0259; // eV at 300K
+    const double kB = 8.617333262e-5; // Boltzmann constant in eV/K
+    const double q = 1.602176634e-19; // Elementary charge in C
+    const double kT = kB * T;         // Thermal voltage in eV
 
     // Get material properties at the junction
     // For simplicity, we'll use the material at x=0 (junction position)
     Materials::Material mat = get_material_at(0.0, 0.0);
 
-    // Calculate intrinsic carrier concentration
-    double ni = std::sqrt(mat.N_c * mat.N_v) * std::exp(-mat.E_g / (2.0 * kT));
+    // Calculate temperature-dependent bandgap
+    // Varshni equation: E_g(T) = E_g(0) - αT²/(T+β)
+    double E_g0 = mat.E_g;      // Bandgap at 0K
+    double alpha = 5.405e-4;    // Material-specific parameter (eV/K)
+    double beta = 204.0;        // Material-specific parameter (K)
+    double E_g_T = E_g0 - (alpha * T * T) / (T + beta);
 
-    // Calculate built-in potential
-    double V_bi = kT * std::log(N_A * N_D / (ni * ni));
+    // Apply bandgap narrowing for heavily doped regions
+    // Slotboom model: ΔE_g = C * ln(N/N_ref)
+    double N_ref = 1e17;        // Reference doping concentration (cm^-3)
+    double C_n = 9e-3;          // Coefficient for n-type (eV)
+    double C_p = 13.5e-3;       // Coefficient for p-type (eV)
 
-    // Ensure the built-in potential is positive
+    // Calculate bandgap narrowing for n-type and p-type regions
+    double delta_E_g_n = 0.0;
+    double delta_E_g_p = 0.0;
+
+    if (N_D > N_ref) {
+        delta_E_g_n = C_n * std::log(N_D / N_ref);
+    }
+
+    if (N_A > N_ref) {
+        delta_E_g_p = C_p * std::log(N_A / N_ref);
+    }
+
+    // Effective bandgap narrowing (use the larger of the two)
+    double delta_E_g = std::max(delta_E_g_n, delta_E_g_p);
+
+    // Apply bandgap narrowing
+    double E_g_eff = E_g_T - delta_E_g;
+
+    // Calculate temperature-dependent effective densities of states
+    double m_e_eff = 0.067;     // Effective electron mass (GaAs)
+    double m_h_eff = 0.45;      // Effective hole mass (GaAs)
+    double h_bar = 6.582119569e-16; // Reduced Planck constant (eV·s)
+    double m_0 = 9.10938356e-31;    // Electron rest mass (kg)
+
+    // Temperature dependence of effective masses (simplified model)
+    m_e_eff *= (1.0 + 0.5e-3 * (T - 300.0));
+    m_h_eff *= (1.0 + 1.0e-3 * (T - 300.0));
+
+    double N_c = 2.0 * std::pow(m_e_eff * m_0 * kT / (2.0 * M_PI * h_bar * h_bar), 1.5);
+    double N_v = 2.0 * std::pow(m_h_eff * m_0 * kT / (2.0 * M_PI * h_bar * h_bar), 1.5);
+
+    // Calculate intrinsic carrier concentration with temperature dependence and bandgap narrowing
+    double ni = std::sqrt(N_c * N_v) * std::exp(-E_g_eff / (2.0 * kT));
+
+    // Apply effective intrinsic carrier concentration due to bandgap narrowing
+    double ni_eff = ni * std::exp(delta_E_g / (2.0 * kT));
+
+    // Calculate Fermi levels using Fermi-Dirac statistics for high doping
+    // For high doping, we need to account for degeneracy
+    double E_F_n = 0.0;  // Fermi level in n-type region relative to conduction band
+    double E_F_p = 0.0;  // Fermi level in p-type region relative to valence band
+
+    // Threshold for degeneracy
+    double N_degeneracy = 5e18;  // cm^-3
+
+    if (N_D > N_degeneracy) {
+        // Use Joyce-Dixon approximation for degenerate n-type
+        double eta_n = kT * std::log(N_D / N_c) + kT * (std::sqrt(2.0) / 4.0) * std::pow(N_D / N_c, 0.75);
+        E_F_n = eta_n;
+    } else {
+        // Use Boltzmann approximation for non-degenerate n-type
+        E_F_n = kT * std::log(N_D / N_c);
+    }
+
+    if (N_A > N_degeneracy) {
+        // Use Joyce-Dixon approximation for degenerate p-type
+        double eta_p = kT * std::log(N_A / N_v) + kT * (std::sqrt(2.0) / 4.0) * std::pow(N_A / N_v, 0.75);
+        E_F_p = eta_p;
+    } else {
+        // Use Boltzmann approximation for non-degenerate p-type
+        E_F_p = kT * std::log(N_A / N_v);
+    }
+
+    // Calculate built-in potential using Fermi levels
+    double V_bi = E_g_eff + E_F_p - E_F_n;
+
+    // Alternative calculation using effective intrinsic carrier concentration
+    double V_bi_alt = kT * std::log(N_A * N_D / (ni_eff * ni_eff));
+
+    // Use the more accurate of the two methods
+    V_bi = (N_A > N_degeneracy || N_D > N_degeneracy) ? V_bi : V_bi_alt;
+
+    // Ensure the built-in potential is positive and physically reasonable
     V_bi = std::max(V_bi, 0.0);
+    V_bi = std::min(V_bi, E_g_eff); // Built-in potential cannot exceed effective bandgap
+
+    // Log the calculated values for debugging
+    std::cout << "Temperature: " << T << " K" << std::endl;
+    std::cout << "Bandgap (T=0K): " << E_g0 << " eV" << std::endl;
+    std::cout << "Bandgap (T=" << T << "K): " << E_g_T << " eV" << std::endl;
+    std::cout << "Bandgap narrowing: " << delta_E_g << " eV" << std::endl;
+    std::cout << "Effective bandgap: " << E_g_eff << " eV" << std::endl;
+    std::cout << "Intrinsic carrier concentration: " << ni << " cm^-3" << std::endl;
+    std::cout << "Effective intrinsic carrier concentration: " << ni_eff << " cm^-3" << std::endl;
+    std::cout << "N-type doping: " << N_D << " cm^-3" << std::endl;
+    std::cout << "P-type doping: " << N_A << " cm^-3" << std::endl;
+
+    // Statistics information
+    if (N_D > N_degeneracy) {
+        std::cout << "N-type region is degenerate (using Fermi-Dirac statistics)" << std::endl;
+    } else {
+        std::cout << "N-type region is non-degenerate (using Boltzmann statistics)" << std::endl;
+    }
+
+    if (N_A > N_degeneracy) {
+        std::cout << "P-type region is degenerate (using Fermi-Dirac statistics)" << std::endl;
+    } else {
+        std::cout << "P-type region is non-degenerate (using Boltzmann statistics)" << std::endl;
+    }
+
+    std::cout << "Fermi level in n-type region: " << E_F_n << " eV (relative to conduction band)" << std::endl;
+    std::cout << "Fermi level in p-type region: " << E_F_p << " eV (relative to valence band)" << std::endl;
+    std::cout << "Built-in potential (Fermi-Dirac): " << E_g_eff + E_F_p - E_F_n << " V" << std::endl;
+    std::cout << "Built-in potential (Boltzmann): " << V_bi_alt << " V" << std::endl;
+    std::cout << "Final built-in potential: " << V_bi << " V" << std::endl;
+
+    return V_bi;
+}
+
+/**
+ * @brief Calculates the built-in potential of a heterojunction.
+ *
+ * This method calculates the built-in potential of a heterojunction
+ * based on the doping concentrations, material properties, and band offsets.
+ * It accounts for the difference in bandgaps, electron affinities, and
+ * effective densities of states between the two materials.
+ *
+ * The built-in potential for a heterojunction is given by:
+ * V_bi = (E_g,n + ΔE_c - ΔE_v) + (kT/q) * ln[(N_A * N_D) / (N_v,p * N_c,n)]
+ *
+ * Where:
+ * - E_g,n is the bandgap of the n-type material
+ * - ΔE_c is the conduction band offset
+ * - ΔE_v is the valence band offset
+ * - kT is the thermal voltage
+ * - q is the elementary charge
+ * - N_A is the acceptor doping concentration in p-type material
+ * - N_D is the donor doping concentration in n-type material
+ * - N_v,p is the effective density of states in the valence band of p-type material
+ * - N_c,n is the effective density of states in the conduction band of n-type material
+ *
+ * @param N_A The acceptor doping concentration in p-type material
+ * @param N_D The donor doping concentration in n-type material
+ * @param mat_p The material properties of the p-type region
+ * @param mat_n The material properties of the n-type region
+ * @param T The temperature in Kelvin (default: 300K)
+ * @return The built-in potential in volts
+ */
+double SelfConsistentSolver::calculate_heterojunction_potential(double N_A, double N_D,
+                                                              const Materials::Material& mat_p,
+                                                              const Materials::Material& mat_n,
+                                                              double T) const {
+    // Constants
+    const double kB = 8.617333262e-5; // Boltzmann constant in eV/K
+    const double q = 1.602176634e-19; // Elementary charge in C
+    const double kT = kB * T;         // Thermal voltage in eV
+
+    // Calculate temperature-dependent bandgaps for both materials
+    // Varshni equation: E_g(T) = E_g(0) - αT²/(T+β)
+
+    // P-type material
+    double E_g0_p = mat_p.E_g;      // Bandgap at 0K
+    double alpha_p = 5.405e-4;      // Material-specific parameter (eV/K)
+    double beta_p = 204.0;          // Material-specific parameter (K)
+    double E_g_T_p = E_g0_p - (alpha_p * T * T) / (T + beta_p);
+
+    // N-type material
+    double E_g0_n = mat_n.E_g;      // Bandgap at 0K
+    double alpha_n = 5.405e-4;      // Material-specific parameter (eV/K)
+    double beta_n = 204.0;          // Material-specific parameter (K)
+    double E_g_T_n = E_g0_n - (alpha_n * T * T) / (T + beta_n);
+
+    // Apply bandgap narrowing for heavily doped regions
+    // Slotboom model: ΔE_g = C * ln(N/N_ref)
+    double N_ref = 1e17;        // Reference doping concentration (cm^-3)
+    double C_n = 9e-3;          // Coefficient for n-type (eV)
+    double C_p = 13.5e-3;       // Coefficient for p-type (eV)
+
+    // Calculate bandgap narrowing
+    double delta_E_g_p = 0.0;
+    double delta_E_g_n = 0.0;
+
+    if (N_A > N_ref) {
+        delta_E_g_p = C_p * std::log(N_A / N_ref);
+    }
+
+    if (N_D > N_ref) {
+        delta_E_g_n = C_n * std::log(N_D / N_ref);
+    }
+
+    // Apply bandgap narrowing
+    double E_g_eff_p = E_g_T_p - delta_E_g_p;
+    double E_g_eff_n = E_g_T_n - delta_E_g_n;
+
+    // Calculate electron affinities (typically material-specific constants)
+    double chi_p = mat_p.chi;  // Electron affinity of p-type material (eV)
+    double chi_n = mat_n.chi;  // Electron affinity of n-type material (eV)
+
+    // Calculate band offsets
+    double delta_E_c = chi_p - chi_n;  // Conduction band offset
+    double delta_E_v = (chi_n + E_g_eff_n) - (chi_p + E_g_eff_p);  // Valence band offset
+
+    // Calculate temperature-dependent effective densities of states
+    // P-type material
+    double m_e_eff_p = 0.067;     // Effective electron mass
+    double m_h_eff_p = 0.45;      // Effective hole mass
+    double h_bar = 6.582119569e-16; // Reduced Planck constant (eV·s)
+    double m_0 = 9.10938356e-31;    // Electron rest mass (kg)
+
+    double N_c_p = 2.0 * std::pow(m_e_eff_p * m_0 * kT / (2.0 * M_PI * h_bar * h_bar), 1.5);
+    double N_v_p = 2.0 * std::pow(m_h_eff_p * m_0 * kT / (2.0 * M_PI * h_bar * h_bar), 1.5);
+
+    // N-type material
+    double m_e_eff_n = 0.067;     // Effective electron mass
+    double m_h_eff_n = 0.45;      // Effective hole mass
+
+    double N_c_n = 2.0 * std::pow(m_e_eff_n * m_0 * kT / (2.0 * M_PI * h_bar * h_bar), 1.5);
+    double N_v_n = 2.0 * std::pow(m_h_eff_n * m_0 * kT / (2.0 * M_PI * h_bar * h_bar), 1.5);
+
+    // Calculate intrinsic carrier concentrations
+    double ni_p = std::sqrt(N_c_p * N_v_p) * std::exp(-E_g_eff_p / (2.0 * kT));
+    double ni_n = std::sqrt(N_c_n * N_v_n) * std::exp(-E_g_eff_n / (2.0 * kT));
+
+    // Calculate Fermi levels using Fermi-Dirac statistics for high doping
+    // Threshold for degeneracy
+    double N_degeneracy = 5e18;  // cm^-3
+
+    // P-type material
+    double E_F_p = 0.0;  // Fermi level in p-type region relative to valence band
+    if (N_A > N_degeneracy) {
+        // Use Joyce-Dixon approximation for degenerate p-type
+        double eta_p = kT * std::log(N_A / N_v_p) + kT * (std::sqrt(2.0) / 4.0) * std::pow(N_A / N_v_p, 0.75);
+        E_F_p = eta_p;
+    } else {
+        // Use Boltzmann approximation for non-degenerate p-type
+        E_F_p = kT * std::log(N_A / N_v_p);
+    }
+
+    // N-type material
+    double E_F_n = 0.0;  // Fermi level in n-type region relative to conduction band
+    if (N_D > N_degeneracy) {
+        // Use Joyce-Dixon approximation for degenerate n-type
+        double eta_n = kT * std::log(N_D / N_c_n) + kT * (std::sqrt(2.0) / 4.0) * std::pow(N_D / N_c_n, 0.75);
+        E_F_n = eta_n;
+    } else {
+        // Use Boltzmann approximation for non-degenerate n-type
+        E_F_n = kT * std::log(N_D / N_c_n);
+    }
+
+    // Calculate built-in potential for heterojunction
+    double V_bi = E_g_eff_n + delta_E_c - delta_E_v + E_F_p - E_F_n;
+
+    // Alternative calculation using intrinsic carrier concentrations
+    double V_bi_alt = kT * std::log((N_A * N_D) / (ni_p * ni_n));
+
+    // Use the more accurate of the two methods
+    V_bi = (N_A > N_degeneracy || N_D > N_degeneracy) ? V_bi : V_bi_alt;
+
+    // Ensure the built-in potential is positive and physically reasonable
+    V_bi = std::max(V_bi, 0.0);
+    V_bi = std::min(V_bi, std::max(E_g_eff_p, E_g_eff_n)); // Cannot exceed the larger bandgap
+
+    // Log the calculated values for debugging
+    std::cout << "Heterojunction built-in potential calculation:" << std::endl;
+    std::cout << "Temperature: " << T << " K" << std::endl;
+    std::cout << "P-type material bandgap: " << E_g_eff_p << " eV" << std::endl;
+    std::cout << "N-type material bandgap: " << E_g_eff_n << " eV" << std::endl;
+    std::cout << "Conduction band offset: " << delta_E_c << " eV" << std::endl;
+    std::cout << "Valence band offset: " << delta_E_v << " eV" << std::endl;
+    std::cout << "P-type doping: " << N_A << " cm^-3" << std::endl;
+    std::cout << "N-type doping: " << N_D << " cm^-3" << std::endl;
+    std::cout << "Fermi level in p-type: " << E_F_p << " eV (relative to valence band)" << std::endl;
+    std::cout << "Fermi level in n-type: " << E_F_n << " eV (relative to conduction band)" << std::endl;
+    std::cout << "Built-in potential (Fermi-Dirac): " << E_g_eff_n + delta_E_c - delta_E_v + E_F_p - E_F_n << " V" << std::endl;
+    std::cout << "Built-in potential (Boltzmann): " << V_bi_alt << " V" << std::endl;
+    std::cout << "Final heterojunction built-in potential: " << V_bi << " V" << std::endl;
 
     return V_bi;
 }
@@ -1218,8 +1492,25 @@ double SelfConsistentSolver::perform_line_search(const Eigen::VectorXd& phi_old,
 void SelfConsistentSolver::solve(double V_p, double V_n, double N_A, double N_D,
                                 double tolerance, int max_iter) {
     try {
-        // Calculate the built-in potential based on doping concentrations
-        double V_bi = calculate_built_in_potential(N_A, N_D);
+        // Calculate the built-in potential
+        double V_bi = 0.0;
+
+        // Check if we have a heterojunction
+        if (has_heterojunction && materials.size() >= 2) {
+            std::cout << "Heterojunction detected. Calculating heterojunction built-in potential..." << std::endl;
+
+            // Find p-type and n-type materials
+            Materials::Material mat_p = materials[0];
+            Materials::Material mat_n = materials[1];
+
+            // Calculate heterojunction built-in potential
+            V_bi = calculate_heterojunction_potential(N_A, N_D, mat_p, mat_n);
+        } else {
+            // Homojunction case
+            std::cout << "Homojunction detected. Calculating built-in potential..." << std::endl;
+            V_bi = calculate_built_in_potential(N_A, N_D);
+        }
+
         std::cout << "Built-in potential: " << V_bi << " V" << std::endl;
 
         // Adjust applied voltages to include built-in potential
@@ -1345,7 +1636,31 @@ void SelfConsistentSolver::solve(double V_p, double V_n, double N_A, double N_D,
         std::cerr << "Error in SelfConsistentSolver::solve: " << e.what() << std::endl;
 
         // Calculate the built-in potential for the fallback solution
-        double V_bi = calculate_built_in_potential(N_A, N_D);
+        double V_bi = 0.0;
+
+        // Check if we have a heterojunction
+        if (has_heterojunction && materials.size() >= 2) {
+            std::cerr << "Heterojunction detected. Using heterojunction built-in potential for fallback..." << std::endl;
+
+            // Find p-type and n-type materials
+            Materials::Material mat_p = materials[0];
+            Materials::Material mat_n = materials[1];
+
+            // Calculate heterojunction built-in potential
+            try {
+                V_bi = calculate_heterojunction_potential(N_A, N_D, mat_p, mat_n);
+            } catch (const std::exception& e) {
+                std::cerr << "Error calculating heterojunction potential: " << e.what() << std::endl;
+                std::cerr << "Using default built-in potential calculation..." << std::endl;
+                V_bi = calculate_built_in_potential(N_A, N_D);
+            }
+        } else {
+            // Homojunction case
+            std::cerr << "Using homojunction built-in potential for fallback..." << std::endl;
+            V_bi = calculate_built_in_potential(N_A, N_D);
+        }
+
+        std::cerr << "Fallback built-in potential: " << V_bi << " V" << std::endl;
 
         // Adjust applied voltages to include built-in potential
         double V_p_effective = V_p;

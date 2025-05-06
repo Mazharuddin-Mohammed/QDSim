@@ -105,16 +105,38 @@ public:
     const Eigen::VectorXd& get_phi_p() const { return phi_p; }
 
     /**
-     * @brief Calculates the built-in potential of the P-N junction.
+     * @brief Calculates the built-in potential of the P-N junction with temperature dependence.
      *
      * This method calculates the built-in potential of the P-N junction
-     * based on the doping concentrations and material properties.
+     * based on the doping concentrations and material properties, with proper
+     * temperature dependence.
      *
      * @param N_A The acceptor doping concentration
      * @param N_D The donor doping concentration
+     * @param T The temperature in Kelvin (default: 300K)
      * @return The built-in potential in volts
      */
-    double calculate_built_in_potential(double N_A, double N_D) const;
+    double calculate_built_in_potential(double N_A, double N_D, double T = 300.0) const;
+
+    /**
+     * @brief Calculates the built-in potential of a heterojunction.
+     *
+     * This method calculates the built-in potential of a heterojunction
+     * based on the doping concentrations, material properties, and band offsets.
+     * It accounts for the difference in bandgaps, electron affinities, and
+     * effective densities of states between the two materials.
+     *
+     * @param N_A The acceptor doping concentration in p-type material
+     * @param N_D The donor doping concentration in n-type material
+     * @param mat_p The material properties of the p-type region
+     * @param mat_n The material properties of the n-type region
+     * @param T The temperature in Kelvin (default: 300K)
+     * @return The built-in potential in volts
+     */
+    double calculate_heterojunction_potential(double N_A, double N_D,
+                                             const Materials::Material& mat_p,
+                                             const Materials::Material& mat_n,
+                                             double T = 300.0) const;
 
     /**
      * @brief Gets the electric field at a given position.
