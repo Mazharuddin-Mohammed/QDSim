@@ -64,7 +64,7 @@ public:
      *
      * @throws std::invalid_argument If the size of refine_flags does not match the number of elements
      */
-    static void refineMesh(Mesh& mesh, const std::vector<bool>& refine_flags);
+    static void refineMesh(Mesh& mesh, const std::vector<bool>& refine_flags, bool allow_hanging_nodes = false);
 #endif
 
     /**
@@ -81,14 +81,57 @@ public:
     static std::vector<bool> computeRefinementFlags(const Mesh& mesh, const Eigen::VectorXd& psi, double threshold);
 
     /**
+     * @brief Computes anisotropic refinement directions.
+     *
+     * This method computes anisotropic refinement directions based on the solution
+     * gradient and hessian. It returns a vector of refinement directions for each
+     * element, where each direction is a unit vector indicating the direction of
+     * maximum error.
+     *
+     * @param mesh The mesh
+     * @param psi The solution vector
+     * @return A vector of refinement directions for each element
+     */
+    static std::vector<Eigen::Vector2d> computeAnisotropicDirections(const Mesh& mesh, const Eigen::VectorXd& psi);
+
+    /**
+     * @brief Refines the mesh anisotropically.
+     *
+     * This method refines the mesh anisotropically by subdividing elements in
+     * specific directions based on the solution features. It is particularly
+     * useful for problems with directional features like boundary layers or shocks.
+     *
+     * @param mesh The mesh to refine
+     * @param refine_flags A vector of boolean flags indicating which elements to refine
+     * @param directions A vector of refinement directions for each element
+     */
+    static void refineAnisotropic(Mesh& mesh, const std::vector<bool>& refine_flags, const std::vector<Eigen::Vector2d>& directions);
+
+    /**
      * @brief Smooths the mesh to improve element quality.
      *
      * This method smooths the mesh by adjusting node positions to improve
      * element quality. It uses a Laplacian smoothing algorithm.
      *
      * @param mesh The mesh to smooth
+     * @param num_iterations The number of smoothing iterations to perform (default: 3)
+     * @param quality_threshold The minimum acceptable element quality (default: 0.3)
      */
-    static void smoothMesh(Mesh& mesh);
+    static void smoothMesh(Mesh& mesh, int num_iterations = 3, double quality_threshold = 0.3);
+
+    /**
+     * @brief Improves mesh quality using optimization-based techniques.
+     *
+     * This method improves mesh quality using optimization-based techniques
+     * such as centroidal Voronoi tessellation (CVT) or optimization of element
+     * quality measures. It is more effective than simple Laplacian smoothing
+     * but also more computationally expensive.
+     *
+     * @param mesh The mesh to improve
+     * @param quality_threshold The minimum acceptable element quality (default: 0.3)
+     * @param max_iterations The maximum number of optimization iterations (default: 10)
+     */
+    static void improveQuality(Mesh& mesh, double quality_threshold = 0.3, int max_iterations = 10);
 
     /**
      * @brief Computes the quality of a triangular element.
@@ -114,4 +157,93 @@ public:
      * @return True if the mesh is conforming, false otherwise
      */
     static bool isMeshConforming(const Mesh& mesh);
+
+    /**
+     * @brief Coarsens the mesh in regions with low error.
+     *
+     * This method coarsens the mesh by merging elements in regions with low error.
+     * It is useful for reducing the computational cost in regions where high
+     * resolution is not needed.
+     *
+     * @param mesh The mesh to coarsen
+     * @param error_indicators The error indicators for each element
+     * @param threshold The threshold for coarsening (elements with error < threshold are coarsened)
+     * @return True if the mesh was coarsened, false otherwise
+     */
+    static bool coarsenMesh(Mesh& mesh, const std::vector<double>& error_indicators, double threshold);
+
+    /**
+     * @brief Computes coarsening flags based on error indicators.
+     *
+     * This method computes coarsening flags based on the error indicators.
+     * Elements with error indicators below the threshold are marked for coarsening.
+     *
+     * @param mesh The mesh
+     * @param error_indicators The error indicators for each element
+     * @param threshold The threshold for coarsening (elements with error < threshold are coarsened)
+     * @return A vector of boolean flags indicating which elements to coarsen
+     */
+    static std::vector<bool> computeCoarseningFlags(const Mesh& mesh, const std::vector<double>& error_indicators, double threshold);
+
+    /**
+     * @brief Computes physics-based refinement flags.
+     *
+     * This method computes refinement flags based on the physics of the problem.
+     * It takes into account the potential function, effective mass, and other
+     * physical parameters to determine where refinement is needed.
+     *
+     * @param mesh The mesh
+     * @param m_star Function that returns the effective mass at a given position
+     * @param V Function that returns the potential at a given position
+     * @param threshold The threshold for refinement
+     * @return A vector of boolean flags indicating which elements to refine
+     */
+    static std::vector<bool> computePhysicsBasedRefinementFlags(
+        const Mesh& mesh,
+        std::function<double(double, double)> m_star,
+        std::function<double(double, double)> V,
+        double threshold);
+
+    /**
+     * @brief Computes the optimal position for a node to improve element quality.
+     *
+     * This is a helper method for improveQuality that computes the optimal position
+     * for a node to improve the quality of its connected elements.
+     *
+     * @param mesh The mesh
+     * @param node_idx The index of the node to optimize
+     * @param connected_elements The indices of elements connected to the node
+     * @return The optimal position for the node
+     */
+    static Eigen::Vector2d computeOptimalPosition(const Mesh& mesh, int node_idx, const std::vector<int>& connected_elements);
+
+    /**
+     * @brief Performs multi-level refinement.
+     *
+     * This method performs multi-level refinement by repeatedly refining
+     * the mesh based on error indicators. It allows for different refinement
+     * levels in different regions of the mesh.
+     *
+     * @param mesh The mesh to refine
+     * @param error_estimator The error estimator to use
+     * @param solution The solution vector
+     * @param H The Hamiltonian matrix
+     * @param M The mass matrix
+     * @param m_star Function that returns the effective mass at a given position
+     * @param V Function that returns the potential at a given position
+     * @param max_levels The maximum number of refinement levels
+     * @param threshold The threshold for refinement
+     * @param allow_hanging_nodes Whether to allow hanging nodes in the mesh (default: false)
+     */
+    static void refineMultiLevel(
+        Mesh& mesh,
+        ErrorEstimator& error_estimator,
+        const Eigen::VectorXd& solution,
+        const Eigen::SparseMatrix<std::complex<double>>& H,
+        const Eigen::SparseMatrix<std::complex<double>>& M,
+        std::function<double(double, double)> m_star,
+        std::function<double(double, double)> V,
+        int max_levels,
+        double threshold,
+        bool allow_hanging_nodes = false);
 };

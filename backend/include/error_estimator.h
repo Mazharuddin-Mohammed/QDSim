@@ -38,7 +38,9 @@ enum class ErrorNorm {
 enum class EstimatorType {
     RESIDUAL,     ///< Residual-based error estimator
     ZZ_RECOVERY,  ///< Zienkiewicz-Zhu recovery-based error estimator
-    HIERARCHICAL  ///< Hierarchical error estimator
+    HIERARCHICAL, ///< Hierarchical error estimator
+    GOAL_ORIENTED,///< Goal-oriented error estimator
+    ANISOTROPIC   ///< Anisotropic error estimator
 };
 
 /**
@@ -169,6 +171,45 @@ private:
                                                    const Eigen::SparseMatrix<std::complex<double>>& M,
                                                    std::function<double(double, double)> m_star,
                                                    std::function<double(double, double)> V);
+
+    /**
+     * @brief Computes goal-oriented error indicators.
+     *
+     * This private method computes goal-oriented error indicators for each element.
+     * It uses a dual-weighted residual approach to estimate the error in a specific
+     * quantity of interest.
+     *
+     * @param solution The solution vector
+     * @param H The Hamiltonian matrix
+     * @param M The mass matrix
+     * @param m_star Function that returns the effective mass at a given position
+     * @param V Function that returns the potential at a given position
+     * @return A vector of error indicators for each element
+     */
+    std::vector<double> computeGoalOrientedEstimator(const Eigen::VectorXd& solution,
+                                                   const Eigen::SparseMatrix<std::complex<double>>& H,
+                                                   const Eigen::SparseMatrix<std::complex<double>>& M,
+                                                   std::function<double(double, double)> m_star,
+                                                   std::function<double(double, double)> V);
+
+    /**
+     * @brief Computes anisotropic error indicators.
+     *
+     * This private method computes anisotropic error indicators for each element.
+     * It estimates the error in different directions to guide anisotropic refinement.
+     *
+     * @param solution The solution vector
+     * @param H The Hamiltonian matrix
+     * @param M The mass matrix
+     * @param m_star Function that returns the effective mass at a given position
+     * @param V Function that returns the potential at a given position
+     * @return A vector of error indicators for each element
+     */
+    std::vector<double> computeAnisotropicEstimator(const Eigen::VectorXd& solution,
+                                                  const Eigen::SparseMatrix<std::complex<double>>& H,
+                                                  const Eigen::SparseMatrix<std::complex<double>>& M,
+                                                  std::function<double(double, double)> m_star,
+                                                  std::function<double(double, double)> V);
 
     /**
      * @brief Computes the L2 norm of a function.
