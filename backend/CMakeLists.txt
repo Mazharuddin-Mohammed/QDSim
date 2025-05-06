@@ -12,6 +12,20 @@ find_package(pybind11 CONFIG REQUIRED)
 # Find Eigen
 find_package(Eigen3 REQUIRED)
 
+# Find JsonCpp
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(JSONCPP jsoncpp)
+if(JSONCPP_FOUND)
+    include_directories(${JSONCPP_INCLUDE_DIRS})
+    link_directories(${JSONCPP_LIBRARY_DIRS})
+    add_definitions(-DUSE_JSONCPP)
+else()
+    message(STATUS "JsonCpp not found. Using bundled version.")
+    include_directories(${CMAKE_CURRENT_SOURCE_DIR}/third_party/jsoncpp/include)
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/jsoncpp)
+    set(JSONCPP_LIBRARIES jsoncpp_lib)
+endif()
+
 # Add MPI support (optional)
 option(USE_MPI "Enable MPI support" OFF)
 if(USE_MPI)
@@ -96,6 +110,8 @@ set(SOURCES
     src/spin_orbit.cpp
     src/error_handling.cpp
     src/simple_interpolator.cpp
+    src/diagnostic_manager.cpp
+    src/error_visualizer.cpp
 )
 
 # CUDA source files
@@ -115,6 +131,9 @@ pybind11_add_module(qdsim_cpp src/bindings.cpp ${SOURCES})
 pybind11_add_module(fe_interpolator_module src/fe_interpolator_module.cpp src/mesh.cpp src/fe_interpolator.cpp src/adaptive_mesh_simple.cpp)
 
 # Link libraries
+target_link_libraries(qdsim_cpp PRIVATE ${JSONCPP_LIBRARIES})
+target_link_libraries(fe_interpolator_module PRIVATE ${JSONCPP_LIBRARIES})
+
 if(USE_MPI)
     target_link_libraries(qdsim_cpp PRIVATE ${MPI_CXX_LIBRARIES})
     target_link_libraries(fe_interpolator_module PRIVATE ${MPI_CXX_LIBRARIES})

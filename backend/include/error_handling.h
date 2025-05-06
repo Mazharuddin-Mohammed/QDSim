@@ -96,7 +96,7 @@ enum class ErrorCode {
  * @brief Exception class for QDSim errors.
  *
  * This class provides detailed error information for exceptions thrown by QDSim,
- * including error code, error message, file, line, and function where the error occurred.
+ * including error code, error message, context, suggestions, file, line, and function where the error occurred.
  */
 class QDSimException : public std::exception {
 public:
@@ -108,24 +108,51 @@ public:
      * @param file The file where the error occurred
      * @param line The line where the error occurred
      * @param function The function where the error occurred
+     * @param context Additional context information about the error
+     * @param suggestions Suggestions for resolving the error
      */
     QDSimException(ErrorCode code, const std::string& message,
                   const std::string& file = "", int line = 0,
-                  const std::string& function = "")
-        : code_(code), message_(message), file_(file), line_(line), function_(function) {
+                  const std::string& function = "",
+                  const std::vector<std::string>& context = {},
+                  const std::vector<std::string>& suggestions = {})
+        : code_(code), message_(message), file_(file), line_(line), function_(function),
+          context_(context), suggestions_(suggestions) {
         // Build the full error message
         std::ostringstream oss;
         oss << "Error " << static_cast<int>(code_) << ": " << message_;
+
+        // Add file, line, and function information
         if (!file_.empty()) {
-            oss << " [" << file_;
+            oss << "\nLocation: " << file_;
             if (line_ > 0) {
                 oss << ":" << line_;
             }
             if (!function_.empty()) {
-                oss << ", " << function_;
+                oss << ", in " << function_;
             }
-            oss << "]";
         }
+
+        // Add context information
+        if (!context_.empty()) {
+            oss << "\n\nContext:";
+            for (const auto& ctx : context_) {
+                oss << "\n- " << ctx;
+            }
+        }
+
+        // Add suggestions
+        if (!suggestions_.empty()) {
+            oss << "\n\nSuggestions:";
+            for (const auto& suggestion : suggestions_) {
+                oss << "\n- " << suggestion;
+            }
+        }
+
+        // Add documentation reference
+        oss << "\n\nFor more information, see: https://qdsim.readthedocs.io/en/latest/errors.html#error-"
+            << static_cast<int>(code_);
+
         full_message_ = oss.str();
     }
 
@@ -183,13 +210,95 @@ public:
         return function_;
     }
 
+    /**
+     * @brief Gets the context information.
+     *
+     * @return The context information
+     */
+    const std::vector<std::string>& context() const {
+        return context_;
+    }
+
+    /**
+     * @brief Gets the suggestions.
+     *
+     * @return The suggestions
+     */
+    const std::vector<std::string>& suggestions() const {
+        return suggestions_;
+    }
+
+    /**
+     * @brief Adds context information to the exception.
+     *
+     * @param context The context information to add
+     */
+    void add_context(const std::string& context) {
+        context_.push_back(context);
+        update_full_message();
+    }
+
+    /**
+     * @brief Adds a suggestion to the exception.
+     *
+     * @param suggestion The suggestion to add
+     */
+    void add_suggestion(const std::string& suggestion) {
+        suggestions_.push_back(suggestion);
+        update_full_message();
+    }
+
 private:
-    ErrorCode code_;          ///< The error code
-    std::string message_;     ///< The error message
-    std::string file_;        ///< The file where the error occurred
-    int line_;                ///< The line where the error occurred
-    std::string function_;    ///< The function where the error occurred
-    std::string full_message_; ///< The full error message
+    /**
+     * @brief Updates the full error message.
+     */
+    void update_full_message() {
+        // Build the full error message
+        std::ostringstream oss;
+        oss << "Error " << static_cast<int>(code_) << ": " << message_;
+
+        // Add file, line, and function information
+        if (!file_.empty()) {
+            oss << "\nLocation: " << file_;
+            if (line_ > 0) {
+                oss << ":" << line_;
+            }
+            if (!function_.empty()) {
+                oss << ", in " << function_;
+            }
+        }
+
+        // Add context information
+        if (!context_.empty()) {
+            oss << "\n\nContext:";
+            for (const auto& ctx : context_) {
+                oss << "\n- " << ctx;
+            }
+        }
+
+        // Add suggestions
+        if (!suggestions_.empty()) {
+            oss << "\n\nSuggestions:";
+            for (const auto& suggestion : suggestions_) {
+                oss << "\n- " << suggestion;
+            }
+        }
+
+        // Add documentation reference
+        oss << "\n\nFor more information, see: https://qdsim.readthedocs.io/en/latest/errors.html#error-"
+            << static_cast<int>(code_);
+
+        full_message_ = oss.str();
+    }
+
+    ErrorCode code_;                      ///< The error code
+    std::string message_;                 ///< The error message
+    std::string file_;                    ///< The file where the error occurred
+    int line_;                            ///< The line where the error occurred
+    std::string function_;                ///< The function where the error occurred
+    std::vector<std::string> context_;    ///< Additional context information
+    std::vector<std::string> suggestions_; ///< Suggestions for resolving the error
+    std::string full_message_;            ///< The full error message
 };
 
 /**
@@ -277,14 +386,74 @@ inline std::string get_error_message(ErrorCode code) {
  * @param file The file where the error occurred
  * @param line The line where the error occurred
  * @param function The function where the error occurred
+ * @param context Additional context information about the error
+ * @param suggestions Suggestions for resolving the error
  *
  * @throws QDSimException with the specified error information
  */
 inline void throw_error(ErrorCode code, const std::string& message = "",
                        const std::string& file = "", int line = 0,
-                       const std::string& function = "") {
+                       const std::string& function = "",
+                       const std::vector<std::string>& context = {},
+                       const std::vector<std::string>& suggestions = {}) {
     std::string error_message = message.empty() ? get_error_message(code) : message;
-    throw QDSimException(code, error_message, file, line, function);
+
+    // Add default suggestions based on error code if none provided
+    std::vector<std::string> error_suggestions = suggestions;
+    if (error_suggestions.empty()) {
+        switch (code) {
+            case ErrorCode::MESH_CREATION_FAILED:
+                error_suggestions.push_back("Check that the mesh parameters are valid");
+                error_suggestions.push_back("Ensure the mesh generator has sufficient memory");
+                error_suggestions.push_back("Try a simpler mesh geometry");
+                break;
+            case ErrorCode::MESH_REFINEMENT_FAILED:
+                error_suggestions.push_back("Check for invalid elements in the mesh");
+                error_suggestions.push_back("Reduce the refinement level");
+                error_suggestions.push_back("Try a different refinement strategy");
+                break;
+            case ErrorCode::MESH_QUALITY_ERROR:
+                error_suggestions.push_back("Use mesh smoothing to improve element quality");
+                error_suggestions.push_back("Refine the mesh with quality control enabled");
+                error_suggestions.push_back("Check for overlapping elements or invalid geometry");
+                break;
+            case ErrorCode::SOLVER_CONVERGENCE_FAILED:
+                error_suggestions.push_back("Increase the maximum number of iterations");
+                error_suggestions.push_back("Try a different solver algorithm");
+                error_suggestions.push_back("Check for physical inconsistencies in the problem setup");
+                error_suggestions.push_back("Use a better initial guess");
+                break;
+            case ErrorCode::EIGENVALUE_COMPUTATION_FAILED:
+                error_suggestions.push_back("Check that the matrices are properly formed");
+                error_suggestions.push_back("Try a different eigensolver");
+                error_suggestions.push_back("Increase the convergence tolerance");
+                error_suggestions.push_back("Reduce the number of requested eigenvalues");
+                break;
+            case ErrorCode::SELF_CONSISTENT_DIVERGENCE:
+                error_suggestions.push_back("Reduce the mixing parameter");
+                error_suggestions.push_back("Use a more robust mixing scheme");
+                error_suggestions.push_back("Check for physical inconsistencies in the problem setup");
+                error_suggestions.push_back("Start with a better initial guess");
+                break;
+            case ErrorCode::OUT_OF_MEMORY:
+                error_suggestions.push_back("Reduce the mesh size");
+                error_suggestions.push_back("Use a more memory-efficient algorithm");
+                error_suggestions.push_back("Enable out-of-core computation if available");
+                error_suggestions.push_back("Run on a machine with more memory");
+                break;
+            case ErrorCode::CUDA_ERROR:
+                error_suggestions.push_back("Check that CUDA is properly installed");
+                error_suggestions.push_back("Update GPU drivers");
+                error_suggestions.push_back("Reduce the problem size to fit in GPU memory");
+                error_suggestions.push_back("Try running with CPU fallback");
+                break;
+            default:
+                // No default suggestions for other error codes
+                break;
+        }
+    }
+
+    throw QDSimException(code, error_message, file, line, function, context, error_suggestions);
 }
 
 /**
@@ -296,14 +465,18 @@ inline void throw_error(ErrorCode code, const std::string& message = "",
  * @param file The file where the validation is performed
  * @param line The line where the validation is performed
  * @param function The function where the validation is performed
+ * @param context Additional context information about the error
+ * @param suggestions Suggestions for resolving the error
  *
  * @throws QDSimException if the condition is false
  */
 inline void validate(bool condition, ErrorCode code, const std::string& message = "",
                     const std::string& file = "", int line = 0,
-                    const std::string& function = "") {
+                    const std::string& function = "",
+                    const std::vector<std::string>& context = {},
+                    const std::vector<std::string>& suggestions = {}) {
     if (!condition) {
-        throw_error(code, message, file, line, function);
+        throw_error(code, message, file, line, function, context, suggestions);
     }
 }
 
@@ -572,6 +745,89 @@ private:
     std::string log_file_;    ///< The log file name
     std::ofstream log_stream_; ///< The log file stream
 };
+
+/**
+ * @brief Gets a timestamp string.
+ *
+ * @return A timestamp string in the format "YYYY-MM-DD HH:MM:SS"
+ */
+inline std::string get_timestamp() {
+    auto now = std::chrono::system_clock::now();
+    auto time_t_now = std::chrono::system_clock::to_time_t(now);
+    std::stringstream ss;
+    ss << std::put_time(std::localtime(&time_t_now), "%Y-%m-%d %H:%M:%S");
+    return ss.str();
+}
+
+/**
+ * @brief Converts an exception to a JSON string.
+ *
+ * @param e The exception to convert
+ * @return A JSON string representation of the exception
+ */
+inline std::string exception_to_json(const QDSimException& e) {
+    std::ostringstream oss;
+    oss << "{\n";
+    oss << "  \"error\": {\n";
+    oss << "    \"code\": " << static_cast<int>(e.code()) << ",\n";
+    oss << "    \"message\": \"" << e.message() << "\",\n";
+    oss << "    \"location\": {\n";
+    oss << "      \"file\": \"" << e.file() << "\",\n";
+    oss << "      \"line\": " << e.line() << ",\n";
+    oss << "      \"function\": \"" << e.function() << "\"\n";
+    oss << "    },\n";
+
+    // Add context
+    oss << "    \"context\": [\n";
+    const auto& context = e.context();
+    for (size_t i = 0; i < context.size(); ++i) {
+        oss << "      \"" << context[i] << "\"";
+        if (i < context.size() - 1) {
+            oss << ",";
+        }
+        oss << "\n";
+    }
+    oss << "    ],\n";
+
+    // Add suggestions
+    oss << "    \"suggestions\": [\n";
+    const auto& suggestions = e.suggestions();
+    for (size_t i = 0; i < suggestions.size(); ++i) {
+        oss << "      \"" << suggestions[i] << "\"";
+        if (i < suggestions.size() - 1) {
+            oss << ",";
+        }
+        oss << "\n";
+    }
+    oss << "    ],\n";
+
+    // Add timestamp
+    oss << "    \"timestamp\": \"" << get_timestamp() << "\"\n";
+
+    oss << "  }\n";
+    oss << "}\n";
+
+    return oss.str();
+}
+
+/**
+ * @brief Writes an exception to a JSON file.
+ *
+ * @param e The exception to write
+ * @param filename The output file name
+ * @return True if the file was written successfully, false otherwise
+ */
+inline bool write_exception_to_json_file(const QDSimException& e, const std::string& filename) {
+    std::ofstream out(filename);
+    if (!out.is_open()) {
+        return false;
+    }
+
+    out << exception_to_json(e);
+    out.close();
+
+    return true;
+}
 
 } // namespace ErrorHandling
 
