@@ -112,6 +112,10 @@ set(SOURCES
     src/simple_interpolator.cpp
     src/diagnostic_manager.cpp
     src/error_visualizer.cpp
+    src/cpu_memory_pool.cpp
+    src/gpu_memory_pool.cpp
+    src/memory_efficient_sparse.cpp
+    src/paged_matrix.cpp
 )
 
 # CUDA source files
