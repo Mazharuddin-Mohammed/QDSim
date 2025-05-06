@@ -156,6 +156,10 @@ set(SOURCES
     src/memory_mapped_matrix.cpp
     src/numa_allocator.cpp
     src/arena_allocator.cpp
+    src/carrier_statistics.cpp
+    src/mobility_models.cpp
+    src/strain_effects.cpp
+    src/bandgap_models.cpp
 )
 
 # CUDA source files
