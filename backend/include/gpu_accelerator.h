@@ -20,6 +20,7 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include <unordered_map>
 
 // Conditional compilation for CUDA support
 #ifdef USE_CUDA
@@ -27,6 +28,7 @@
 #include <cusolverDn.h>
 #include <cublas_v2.h>
 #include <cusparse.h>
+#include "gpu_memory_pool.h"
 #endif
 
 /**
@@ -230,6 +232,63 @@ private:
     cusolverDnHandle_t cusolver_handle_; ///< cuSOLVER handle
     cublasHandle_t cublas_handle_; ///< cuBLAS handle
     cusparseHandle_t cusparse_handle_; ///< cuSPARSE handle
+
+    // Persistent GPU memory buffers
+    struct GPUBuffer {
+        void* ptr;
+        size_t size;
+        std::string tag;
+    };
+
+    // Cache for mesh data to avoid repeated transfers
+    struct MeshCache {
+        double* d_nodes;
+        int* d_elements;
+        size_t num_nodes;
+        size_t num_elements;
+        size_t nodes_per_elem;
+        bool valid;
+    };
+
+    std::unordered_map<std::string, GPUBuffer> gpu_buffers_; ///< Persistent GPU memory buffers
+    MeshCache mesh_cache_; ///< Cache for mesh data
+
+    // Stream for asynchronous operations
+    cudaStream_t stream_; ///< CUDA stream for asynchronous operations
+
+    /**
+     * @brief Gets a GPU buffer of the specified size.
+     *
+     * This method gets a GPU buffer of the specified size. If a buffer with the
+     * specified tag already exists and is large enough, it is returned. Otherwise,
+     * a new buffer is allocated.
+     *
+     * @param size The size of the buffer in bytes
+     * @param tag A tag to identify the buffer
+     * @return A pointer to the buffer
+     */
+    void* get_gpu_buffer(size_t size, const std::string& tag);
+
+    /**
+     * @brief Releases a GPU buffer.
+     *
+     * This method releases a GPU buffer. The buffer is not actually freed, but is
+     * marked as available for reuse.
+     *
+     * @param tag The tag of the buffer to release
+     */
+    void release_gpu_buffer(const std::string& tag);
+
+    /**
+     * @brief Caches mesh data on the GPU.
+     *
+     * This method caches mesh data on the GPU to avoid repeated transfers.
+     *
+     * @param mesh The mesh to cache
+     * @param order The order of the finite elements
+     * @return True if the mesh was cached successfully, false otherwise
+     */
+    bool cache_mesh(const Mesh& mesh, int order);
 
     /**
      * @brief Initializes the GPU device and CUDA libraries.

@@ -426,6 +426,7 @@ __global__ void interpolate_field_kernel(
  * @brief CUDA kernel for batched assembly of element matrices.
  *
  * This kernel computes the element Hamiltonian and mass matrices for multiple elements in parallel.
+ * It uses shared memory and other optimizations for better performance.
  *
  * @param batch_start The starting index of the batch
  * @param batch_size The size of the batch
@@ -435,19 +436,19 @@ __global__ void interpolate_field_kernel(
  * @param M_e The element mass matrices (output)
  * @param m_star_values The effective mass values at quadrature points
  * @param V_values The potential values at quadrature points
- * @param num_nodes The number of nodes in the mesh
+ * @param nodes_per_elem The number of nodes per element
  * @param order The order of the finite elements
  */
 __global__ void assemble_element_matrices_batched_kernel(
     int batch_start,
     int batch_size,
-    const double* nodes,
-    const int* elements,
-    thrust::complex<double>* H_e,
-    thrust::complex<double>* M_e,
-    const double* m_star_values,
-    const double* V_values,
-    int num_nodes,
+    const double* __restrict__ nodes,
+    const int* __restrict__ elements,
+    thrust::complex<double>* __restrict__ H_e,
+    thrust::complex<double>* __restrict__ M_e,
+    const double* __restrict__ m_star_values,
+    const double* __restrict__ V_values,
+    int nodes_per_elem,
     int order
 ) {
     // Get thread indices
@@ -463,9 +464,6 @@ __global__ void assemble_element_matrices_batched_kernel(
         return;
     }
 
-    // Get number of nodes per element based on order
-    int nodes_per_elem = (order == 1) ? 3 : (order == 2) ? 6 : 10;
-
     // Check if thread indices are valid
     if (i >= nodes_per_elem || j >= nodes_per_elem) {
         return;
@@ -474,21 +472,53 @@ __global__ void assemble_element_matrices_batched_kernel(
     // Get matrix index
     int matrix_idx = element_offset * nodes_per_elem * nodes_per_elem + i * nodes_per_elem + j;
 
+    // Use shared memory for element data to reduce global memory access
+    extern __shared__ double s_data[];
+
+    // Shared memory layout:
+    // - Element node indices: nodes_per_elem integers
+    // - Element node coordinates: 2 * nodes_per_elem doubles
+    // - Material properties: 2 doubles (m_star and V)
+
+    int* s_element_indices = reinterpret_cast<int*>(s_data);
+    double* s_node_coords = reinterpret_cast<double*>(s_element_indices + nodes_per_elem);
+    double* s_material_props = s_node_coords + 2 * nodes_per_elem;
+
+    // Load element data into shared memory (cooperative loading)
+    if (threadIdx.x < nodes_per_elem && threadIdx.y == 0) {
+        // Load element node index
+        int node_idx_offset = (order == 1) ? 3 : (order == 2) ? 6 : 10;
+        s_element_indices[threadIdx.x] = elements[node_idx_offset * element_idx + threadIdx.x];
+    }
+
+    // Ensure element indices are loaded
+    __syncthreads();
+
+    // Load node coordinates (cooperative loading)
+    if (threadIdx.x < nodes_per_elem && threadIdx.y < 2) {
+        int node_idx = s_element_indices[threadIdx.x];
+        s_node_coords[threadIdx.x * 2 + threadIdx.y] = nodes[node_idx * 2 + threadIdx.y];
+    }
+
+    // Load material properties
+    if (threadIdx.x == 0 && threadIdx.y == 0) {
+        s_material_props[0] = m_star_values[element_offset]; // m_star
+        s_material_props[1] = V_values[element_offset];      // V
+    }
+
+    // Ensure all data is loaded
+    __syncthreads();
+
     // Call appropriate kernel logic based on order
     if (order == 1) {
         // Linear elements (P1)
-        // Get element node indices
-        int n1 = elements[3 * element_idx];
-        int n2 = elements[3 * element_idx + 1];
-        int n3 = elements[3 * element_idx + 2];
-
-        // Get node coordinates
-        double x1 = nodes[2 * n1];
-        double y1 = nodes[2 * n1 + 1];
-        double x2 = nodes[2 * n2];
-        double y2 = nodes[2 * n2 + 1];
-        double x3 = nodes[2 * n3];
-        double y3 = nodes[2 * n3 + 1];
+        // Get node coordinates from shared memory
+        double x1 = s_node_coords[0];
+        double y1 = s_node_coords[1];
+        double x2 = s_node_coords[2];
+        double y2 = s_node_coords[3];
+        double x3 = s_node_coords[4];
+        double y3 = s_node_coords[5];
 
         // Calculate element area
         double area = 0.5 * fabs((x2 - x1) * (y3 - y1) - (x3 - x1) * (y2 - y1));
@@ -501,43 +531,39 @@ __global__ void assemble_element_matrices_batched_kernel(
         double c2 = (x1 - x3) / (2.0 * area);
         double c3 = (x2 - x1) / (2.0 * area);
 
-        // Calculate element centroid
-        double xc = (x1 + x2 + x3) / 3.0;
-        double yc = (y1 + y2 + y3) / 3.0;
-
-        // Get effective mass and potential at centroid
-        double m = m_star_values[element_idx];
-        double V_val = V_values[element_idx];
+        // Get effective mass and potential from shared memory
+        double m = s_material_props[0];
+        double V_val = s_material_props[1];
 
         // Calculate gradients of shape functions
         double dNi_dx, dNi_dy, dNj_dx, dNj_dy;
 
-        if (i == 0) { dNi_dx = b1; dNi_dy = c1; }
-        else if (i == 1) { dNi_dx = b2; dNi_dy = c2; }
-        else { dNi_dx = b3; dNi_dy = c3; }
+        // Use lookup tables for better performance
+        const double dN_dx[3] = {b1, b2, b3};
+        const double dN_dy[3] = {c1, c2, c3};
 
-        if (j == 0) { dNj_dx = b1; dNj_dy = c1; }
-        else if (j == 1) { dNj_dx = b2; dNj_dy = c2; }
-        else { dNj_dx = b3; dNj_dy = c3; }
+        dNi_dx = dN_dx[i];
+        dNi_dy = dN_dy[i];
+        dNj_dx = dN_dx[j];
+        dNj_dy = dN_dy[j];
 
-        // Calculate shape functions at centroid
-        double Ni, Nj;
-
-        if (i == 0) Ni = 1.0/3.0;
-        else if (i == 1) Ni = 1.0/3.0;
-        else Ni = 1.0/3.0;
-
-        if (j == 0) Nj = 1.0/3.0;
-        else if (j == 1) Nj = 1.0/3.0;
-        else Nj = 1.0/3.0;
+        // For linear elements, shape functions at centroid are all 1/3
+        const double N_centroid = 1.0/3.0;
 
         // Calculate Hamiltonian matrix element
+        // H_ij = ∫ (ħ²/2m) ∇Ni·∇Nj + V·Ni·Nj dΩ
         double kinetic_term = (HBAR * HBAR / (2.0 * m)) * (dNi_dx * dNj_dx + dNi_dy * dNj_dy) * area;
-        double potential_term = V_val * Ni * Nj * area;
+        double potential_term = V_val * N_centroid * N_centroid * area;
+
+        // Use direct write to global memory with coalesced access pattern
         H_e[matrix_idx] = thrust::complex<double>(kinetic_term + potential_term, 0.0);
 
         // Calculate mass matrix element
-        M_e[matrix_idx] = thrust::complex<double>(Ni * Nj * area, 0.0);
+        // M_ij = ∫ Ni·Nj dΩ
+        // For linear elements, we can use the analytical formula:
+        // M_ii = area/6, M_ij = area/12 (i≠j)
+        double mass_value = (i == j) ? area/6.0 : area/12.0;
+        M_e[matrix_idx] = thrust::complex<double>(mass_value, 0.0);
     }
     else if (order == 2) {
         // Quadratic elements (P2)
@@ -979,8 +1005,17 @@ extern "C" void assemble_element_matrices_batched_cuda(
         (nodes_per_elem + block_dim - 1) / block_dim
     );
 
-    // Launch kernel with optimized configuration
-    assemble_element_matrices_batched_kernel<<<grid_size, block_size>>>(
+    // Calculate shared memory size
+    // Shared memory layout:
+    // - Element node indices: nodes_per_elem integers
+    // - Element node coordinates: 2 * nodes_per_elem doubles
+    // - Material properties: 2 doubles (m_star and V)
+    size_t shared_mem_size = nodes_per_elem * sizeof(int) +
+                            2 * nodes_per_elem * sizeof(double) +
+                            2 * sizeof(double);
+
+    // Launch kernel with optimized configuration and shared memory
+    assemble_element_matrices_batched_kernel<<<grid_size, block_size, shared_mem_size>>>(
         batch_start, batch_size, nodes, elements, d_H_e, d_M_e, m_star_values, V_values, nodes_per_elem, order
     );
 

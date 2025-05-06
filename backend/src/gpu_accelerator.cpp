@@ -160,6 +160,54 @@ void GPUAccelerator::initialize_gpu() {
         throw std::runtime_error("Failed to create cuSPARSE handle");
     }
 
+    // Create CUDA stream for asynchronous operations
+    cuda_status = cudaStreamCreate(&stream_);
+    if (cuda_status != cudaSuccess) {
+        cusparseDestroy(cusparse_handle_);
+        cublasDestroy(cublas_handle_);
+        cusolverDnDestroy(cusolver_handle_);
+        throw std::runtime_error("Failed to create CUDA stream: " +
+                                std::string(cudaGetErrorString(cuda_status)));
+    }
+
+    // Set stream for cuSOLVER
+    cusolver_status = cusolverDnSetStream(cusolver_handle_, stream_);
+    if (cusolver_status != CUSOLVER_STATUS_SUCCESS) {
+        cudaStreamDestroy(stream_);
+        cusparseDestroy(cusparse_handle_);
+        cublasDestroy(cublas_handle_);
+        cusolverDnDestroy(cusolver_handle_);
+        throw std::runtime_error("Failed to set stream for cuSOLVER");
+    }
+
+    // Set stream for cuBLAS
+    cublas_status = cublasSetStream(cublas_handle_, stream_);
+    if (cublas_status != CUBLAS_STATUS_SUCCESS) {
+        cudaStreamDestroy(stream_);
+        cusparseDestroy(cusparse_handle_);
+        cublasDestroy(cublas_handle_);
+        cusolverDnDestroy(cusolver_handle_);
+        throw std::runtime_error("Failed to set stream for cuBLAS");
+    }
+
+    // Set stream for cuSPARSE
+    cusparse_status = cusparseSetStream(cusparse_handle_, stream_);
+    if (cusparse_status != CUSPARSE_STATUS_SUCCESS) {
+        cudaStreamDestroy(stream_);
+        cusparseDestroy(cusparse_handle_);
+        cublasDestroy(cublas_handle_);
+        cusolverDnDestroy(cusolver_handle_);
+        throw std::runtime_error("Failed to set stream for cuSPARSE");
+    }
+
+    // Initialize mesh cache
+    mesh_cache_.d_nodes = nullptr;
+    mesh_cache_.d_elements = nullptr;
+    mesh_cache_.num_nodes = 0;
+    mesh_cache_.num_elements = 0;
+    mesh_cache_.nodes_per_elem = 0;
+    mesh_cache_.valid = false;
+
     // Build device info string
     std::stringstream ss;
     ss << "GPU Device: " << device_prop_.name << "\n";
@@ -174,6 +222,31 @@ void GPUAccelerator::initialize_gpu() {
 
 // Cleanup GPU resources
 void GPUAccelerator::cleanup_gpu() {
+    // Free all GPU buffers
+    for (auto& buffer : gpu_buffers_) {
+        if (buffer.second.ptr != nullptr) {
+            GPUMemoryPool::getInstance().release(buffer.second.ptr, buffer.second.size);
+            buffer.second.ptr = nullptr;
+        }
+    }
+    gpu_buffers_.clear();
+
+    // Free mesh cache
+    if (mesh_cache_.valid) {
+        if (mesh_cache_.d_nodes != nullptr) {
+            GPUMemoryPool::getInstance().release(mesh_cache_.d_nodes, 2 * mesh_cache_.num_nodes * sizeof(double));
+            mesh_cache_.d_nodes = nullptr;
+        }
+        if (mesh_cache_.d_elements != nullptr) {
+            GPUMemoryPool::getInstance().release(mesh_cache_.d_elements, mesh_cache_.nodes_per_elem * mesh_cache_.num_elements * sizeof(int));
+            mesh_cache_.d_elements = nullptr;
+        }
+        mesh_cache_.valid = false;
+    }
+
+    // Destroy CUDA stream
+    cudaStreamDestroy(stream_);
+
     // Destroy cuSPARSE handle
     cusparseDestroy(cusparse_handle_);
 
@@ -183,8 +256,182 @@ void GPUAccelerator::cleanup_gpu() {
     // Destroy cuSOLVER handle
     cusolverDnDestroy(cusolver_handle_);
 
+    // Free all memory in the pool
+    GPUMemoryPool::getInstance().freeAll();
+
     // Reset device
     cudaDeviceReset();
+}
+
+// Get a GPU buffer of the specified size
+void* GPUAccelerator::get_gpu_buffer(size_t size, const std::string& tag) {
+    // Check if buffer already exists
+    auto it = gpu_buffers_.find(tag);
+    if (it != gpu_buffers_.end()) {
+        // Check if existing buffer is large enough
+        if (it->second.size >= size) {
+            return it->second.ptr;
+        }
+
+        // Release existing buffer
+        GPUMemoryPool::getInstance().release(it->second.ptr, it->second.size);
+    }
+
+    // Allocate new buffer
+    void* ptr = GPUMemoryPool::getInstance().allocate(size, tag);
+
+    // Store buffer
+    gpu_buffers_[tag] = {ptr, size, tag};
+
+    return ptr;
+}
+
+// Release a GPU buffer
+void GPUAccelerator::release_gpu_buffer(const std::string& tag) {
+    // Check if buffer exists
+    auto it = gpu_buffers_.find(tag);
+    if (it != gpu_buffers_.end()) {
+        // Release buffer
+        GPUMemoryPool::getInstance().release(it->second.ptr, it->second.size);
+
+        // Remove from map
+        gpu_buffers_.erase(it);
+    }
+}
+
+// Cache mesh data on the GPU
+bool GPUAccelerator::cache_mesh(const Mesh& mesh, int order) {
+    const auto& nodes = mesh.getNodes();
+    int num_nodes = nodes.size();
+    int num_elements = 0;
+    int nodes_per_elem = 0;
+
+    // Get element data based on order
+    if (order == 1) {
+        const auto& elements = mesh.getElements();
+        num_elements = elements.size();
+        nodes_per_elem = 3;
+    } else if (order == 2) {
+        const auto& elements = mesh.getQuadraticElements();
+        num_elements = elements.size();
+        nodes_per_elem = 6;
+    } else if (order == 3) {
+        const auto& elements = mesh.getCubicElements();
+        num_elements = elements.size();
+        nodes_per_elem = 10;
+    } else {
+        return false;
+    }
+
+    // Check if mesh is already cached with the same parameters
+    if (mesh_cache_.valid &&
+        mesh_cache_.num_nodes == num_nodes &&
+        mesh_cache_.num_elements == num_elements &&
+        mesh_cache_.nodes_per_elem == nodes_per_elem) {
+        return true;
+    }
+
+    // Free existing cache if any
+    if (mesh_cache_.valid) {
+        if (mesh_cache_.d_nodes != nullptr) {
+            GPUMemoryPool::getInstance().release(mesh_cache_.d_nodes, 2 * mesh_cache_.num_nodes * sizeof(double));
+            mesh_cache_.d_nodes = nullptr;
+        }
+        if (mesh_cache_.d_elements != nullptr) {
+            GPUMemoryPool::getInstance().release(mesh_cache_.d_elements, mesh_cache_.nodes_per_elem * mesh_cache_.num_elements * sizeof(int));
+            mesh_cache_.d_elements = nullptr;
+        }
+        mesh_cache_.valid = false;
+    }
+
+    try {
+        // Allocate memory for nodes
+        mesh_cache_.d_nodes = static_cast<double*>(
+            GPUMemoryPool::getInstance().allocate(2 * num_nodes * sizeof(double), "mesh_nodes"));
+
+        // Allocate memory for elements
+        mesh_cache_.d_elements = static_cast<int*>(
+            GPUMemoryPool::getInstance().allocate(nodes_per_elem * num_elements * sizeof(int), "mesh_elements"));
+
+        // Flatten nodes array
+        std::vector<double> nodes_flat(2 * num_nodes);
+        for (int i = 0; i < num_nodes; ++i) {
+            nodes_flat[2 * i] = nodes[i][0];
+            nodes_flat[2 * i + 1] = nodes[i][1];
+        }
+
+        // Copy nodes to GPU
+        cudaError_t cuda_status = cudaMemcpyAsync(
+            mesh_cache_.d_nodes, nodes_flat.data(), 2 * num_nodes * sizeof(double),
+            cudaMemcpyHostToDevice, stream_);
+        if (cuda_status != cudaSuccess) {
+            throw std::runtime_error("Failed to copy nodes to GPU: " +
+                                    std::string(cudaGetErrorString(cuda_status)));
+        }
+
+        // Flatten elements array
+        std::vector<int> elements_flat(nodes_per_elem * num_elements);
+        if (order == 1) {
+            const auto& elements = mesh.getElements();
+            for (int i = 0; i < num_elements; ++i) {
+                for (int j = 0; j < nodes_per_elem; ++j) {
+                    elements_flat[nodes_per_elem * i + j] = elements[i][j];
+                }
+            }
+        } else if (order == 2) {
+            const auto& elements = mesh.getQuadraticElements();
+            for (int i = 0; i < num_elements; ++i) {
+                for (int j = 0; j < nodes_per_elem; ++j) {
+                    elements_flat[nodes_per_elem * i + j] = elements[i][j];
+                }
+            }
+        } else if (order == 3) {
+            const auto& elements = mesh.getCubicElements();
+            for (int i = 0; i < num_elements; ++i) {
+                for (int j = 0; j < nodes_per_elem; ++j) {
+                    elements_flat[nodes_per_elem * i + j] = elements[i][j];
+                }
+            }
+        }
+
+        // Copy elements to GPU
+        cuda_status = cudaMemcpyAsync(
+            mesh_cache_.d_elements, elements_flat.data(), nodes_per_elem * num_elements * sizeof(int),
+            cudaMemcpyHostToDevice, stream_);
+        if (cuda_status != cudaSuccess) {
+            throw std::runtime_error("Failed to copy elements to GPU: " +
+                                    std::string(cudaGetErrorString(cuda_status)));
+        }
+
+        // Synchronize stream to ensure data is copied
+        cuda_status = cudaStreamSynchronize(stream_);
+        if (cuda_status != cudaSuccess) {
+            throw std::runtime_error("Failed to synchronize CUDA stream: " +
+                                    std::string(cudaGetErrorString(cuda_status)));
+        }
+
+        // Update cache metadata
+        mesh_cache_.num_nodes = num_nodes;
+        mesh_cache_.num_elements = num_elements;
+        mesh_cache_.nodes_per_elem = nodes_per_elem;
+        mesh_cache_.valid = true;
+
+        return true;
+    } catch (const std::exception& e) {
+        // Clean up on failure
+        if (mesh_cache_.d_nodes != nullptr) {
+            GPUMemoryPool::getInstance().release(mesh_cache_.d_nodes, 2 * num_nodes * sizeof(double));
+            mesh_cache_.d_nodes = nullptr;
+        }
+        if (mesh_cache_.d_elements != nullptr) {
+            GPUMemoryPool::getInstance().release(mesh_cache_.d_elements, nodes_per_elem * num_elements * sizeof(int));
+            mesh_cache_.d_elements = nullptr;
+        }
+        mesh_cache_.valid = false;
+
+        std::cerr << "Failed to cache mesh: " << e.what() << std::endl;
+        return false;
+    }
 }
 #endif
 
@@ -221,81 +468,169 @@ void GPUAccelerator::assemble_matrices(const Mesh& mesh,
     H_triplets.reserve(num_elements * entries_per_elem);
     M_triplets.reserve(num_elements * entries_per_elem);
 
-    // Copy mesh data to GPU
-    double* d_nodes = nullptr;
-    int* d_elements = nullptr;
-
-    // Allocate memory on GPU
-    cudaError_t cuda_status = cudaMalloc(&d_nodes, 2 * num_nodes * sizeof(double));
-    if (cuda_status != cudaSuccess) {
-        throw std::runtime_error("Failed to allocate GPU memory for nodes: " +
-                                std::string(cudaGetErrorString(cuda_status)));
+    // Cache mesh data on GPU
+    if (!cache_mesh(mesh, order)) {
+        throw std::runtime_error("Failed to cache mesh data on GPU");
     }
 
-    cuda_status = cudaMalloc(&d_elements, 3 * num_elements * sizeof(int));
-    if (cuda_status != cudaSuccess) {
-        cudaFree(d_nodes);
-        throw std::runtime_error("Failed to allocate GPU memory for elements: " +
-                                std::string(cudaGetErrorString(cuda_status)));
-    }
+    // Get cached mesh data
+    double* d_nodes = mesh_cache_.d_nodes;
+    int* d_elements = mesh_cache_.d_elements;
 
-    // Copy data to GPU
-    // Flatten nodes array
-    std::vector<double> nodes_flat(2 * num_nodes);
-    for (int i = 0; i < num_nodes; ++i) {
-        nodes_flat[2 * i] = nodes[i][0];
-        nodes_flat[2 * i + 1] = nodes[i][1];
-    }
+    // Determine optimal batch size based on GPU properties
+    int max_threads_per_block = device_prop_.maxThreadsPerBlock;
+    int max_blocks_per_sm = device_prop_.maxBlocksPerMultiProcessor;
+    int num_sm = device_prop_.multiProcessorCount;
 
-    cuda_status = cudaMemcpy(d_nodes, nodes_flat.data(), 2 * num_nodes * sizeof(double), cudaMemcpyHostToDevice);
-    if (cuda_status != cudaSuccess) {
-        cudaFree(d_elements);
-        cudaFree(d_nodes);
-        throw std::runtime_error("Failed to copy nodes to GPU: " +
-                                std::string(cudaGetErrorString(cuda_status)));
-    }
+    // Calculate optimal batch size to maximize GPU utilization
+    // We want to keep all SMs busy with enough blocks
+    int optimal_batch_size = max_blocks_per_sm * num_sm;
 
-    // Flatten elements array
-    std::vector<int> elements_flat(3 * num_elements);
-    for (int i = 0; i < num_elements; ++i) {
-        elements_flat[3 * i] = elements[i][0];
-        elements_flat[3 * i + 1] = elements[i][1];
-        elements_flat[3 * i + 2] = elements[i][2];
-    }
+    // Limit batch size to avoid excessive memory usage
+    int batch_size = std::min(optimal_batch_size, 256);
 
-    cuda_status = cudaMemcpy(d_elements, elements_flat.data(), 3 * num_elements * sizeof(int), cudaMemcpyHostToDevice);
-    if (cuda_status != cudaSuccess) {
-        cudaFree(d_elements);
-        cudaFree(d_nodes);
-        throw std::runtime_error("Failed to copy elements to GPU: " +
-                                std::string(cudaGetErrorString(cuda_status)));
-    }
+    // Ensure batch size is at least 32 (warp size) for efficiency
+    batch_size = std::max(batch_size, 32);
 
-    // Allocate memory for element matrices
-    std::complex<double>* H_e = new std::complex<double>[nodes_per_elem * nodes_per_elem];
-    std::complex<double>* M_e = new std::complex<double>[nodes_per_elem * nodes_per_elem];
+    // Limit batch size to the number of elements
+    batch_size = std::min(batch_size, num_elements);
 
-    // Process elements
-    for (int e = 0; e < num_elements; ++e) {
-        // Assemble element matrices on GPU
-        assemble_element_matrix_gpu(e, d_nodes, d_elements, m_star, V, order, H_e, M_e);
+    // Allocate memory for material properties
+    double* m_star_values = new double[batch_size];
+    double* V_values = new double[batch_size];
+
+    // Allocate memory for batch results using memory pool
+    std::complex<double>* H_batch = static_cast<std::complex<double>*>(
+        get_gpu_buffer(batch_size * nodes_per_elem * nodes_per_elem * sizeof(std::complex<double>), "H_batch"));
+
+    std::complex<double>* M_batch = static_cast<std::complex<double>*>(
+        get_gpu_buffer(batch_size * nodes_per_elem * nodes_per_elem * sizeof(std::complex<double>), "M_batch"));
+
+    // Process elements in batches
+    for (int batch_start = 0; batch_start < num_elements; batch_start += batch_size) {
+        int current_batch_size = std::min(batch_size, num_elements - batch_start);
+
+        // Compute material properties for each element in the batch
+        for (int i = 0; i < current_batch_size; ++i) {
+            int e = batch_start + i;
+
+            // Get element centroid
+            double xc = 0.0, yc = 0.0;
+
+            // Use the first 3 nodes (vertices) to compute centroid
+            double x1 = nodes[elements[e][0]][0];
+            double y1 = nodes[elements[e][0]][1];
+            double x2 = nodes[elements[e][1]][0];
+            double y2 = nodes[elements[e][1]][1];
+            double x3 = nodes[elements[e][2]][0];
+            double y3 = nodes[elements[e][2]][1];
+
+            xc = (x1 + x2 + x3) / 3.0;
+            yc = (y1 + y2 + y3) / 3.0;
+
+            // Evaluate material properties at centroid
+            m_star_values[i] = m_star(xc, yc);
+            V_values[i] = V(xc, yc);
+        }
+
+        // Copy material properties to GPU
+        double* d_m_star_values = static_cast<double*>(
+            get_gpu_buffer(batch_size * sizeof(double), "m_star_values"));
+
+        double* d_V_values = static_cast<double*>(
+            get_gpu_buffer(batch_size * sizeof(double), "V_values"));
+
+        cudaError_t cuda_status = cudaMemcpyAsync(
+            d_m_star_values, m_star_values, current_batch_size * sizeof(double),
+            cudaMemcpyHostToDevice, stream_);
+
+        if (cuda_status != cudaSuccess) {
+            delete[] m_star_values;
+            delete[] V_values;
+            throw std::runtime_error("Failed to copy m_star values to GPU: " +
+                                    std::string(cudaGetErrorString(cuda_status)));
+        }
+
+        cuda_status = cudaMemcpyAsync(
+            d_V_values, V_values, current_batch_size * sizeof(double),
+            cudaMemcpyHostToDevice, stream_);
+
+        if (cuda_status != cudaSuccess) {
+            delete[] m_star_values;
+            delete[] V_values;
+            throw std::runtime_error("Failed to copy V values to GPU: " +
+                                    std::string(cudaGetErrorString(cuda_status)));
+        }
+
+        // Launch GPU kernel for batch processing
+        assemble_element_matrices_batched_cuda(
+            batch_start, current_batch_size, d_nodes, d_elements,
+            H_batch, M_batch, d_m_star_values, d_V_values, order
+        );
+
+        // Copy results back to host
+        std::complex<double>* h_H_batch = new std::complex<double>[current_batch_size * nodes_per_elem * nodes_per_elem];
+        std::complex<double>* h_M_batch = new std::complex<double>[current_batch_size * nodes_per_elem * nodes_per_elem];
+
+        cuda_status = cudaMemcpyAsync(
+            h_H_batch, H_batch, current_batch_size * nodes_per_elem * nodes_per_elem * sizeof(std::complex<double>),
+            cudaMemcpyDeviceToHost, stream_);
+
+        if (cuda_status != cudaSuccess) {
+            delete[] h_H_batch;
+            delete[] h_M_batch;
+            delete[] m_star_values;
+            delete[] V_values;
+            throw std::runtime_error("Failed to copy H_batch from GPU: " +
+                                    std::string(cudaGetErrorString(cuda_status)));
+        }
+
+        cuda_status = cudaMemcpyAsync(
+            h_M_batch, M_batch, current_batch_size * nodes_per_elem * nodes_per_elem * sizeof(std::complex<double>),
+            cudaMemcpyDeviceToHost, stream_);
+
+        if (cuda_status != cudaSuccess) {
+            delete[] h_H_batch;
+            delete[] h_M_batch;
+            delete[] m_star_values;
+            delete[] V_values;
+            throw std::runtime_error("Failed to copy M_batch from GPU: " +
+                                    std::string(cudaGetErrorString(cuda_status)));
+        }
+
+        // Synchronize stream to ensure data is copied
+        cuda_status = cudaStreamSynchronize(stream_);
+        if (cuda_status != cudaSuccess) {
+            delete[] h_H_batch;
+            delete[] h_M_batch;
+            delete[] m_star_values;
+            delete[] V_values;
+            throw std::runtime_error("Failed to synchronize CUDA stream: " +
+                                    std::string(cudaGetErrorString(cuda_status)));
+        }
 
         // Add to triplet lists
-        for (int i = 0; i < nodes_per_elem; ++i) {
+        for (int i = 0; i < current_batch_size; ++i) {
+            int e = batch_start + i;
             for (int j = 0; j < nodes_per_elem; ++j) {
-                int global_i = elements[e][i];
-                int global_j = elements[e][j];
-                H_triplets.emplace_back(global_i, global_j, H_e[i * nodes_per_elem + j]);
-                M_triplets.emplace_back(global_i, global_j, M_e[i * nodes_per_elem + j]);
+                for (int k = 0; k < nodes_per_elem; ++k) {
+                    int global_j = elements[e][j];
+                    int global_k = elements[e][k];
+                    int idx = i * nodes_per_elem * nodes_per_elem + j * nodes_per_elem + k;
+                    H_triplets.emplace_back(global_j, global_k, h_H_batch[idx]);
+                    M_triplets.emplace_back(global_j, global_k, h_M_batch[idx]);
+                }
             }
         }
+
+        // Clean up batch results
+        delete[] h_H_batch;
+        delete[] h_M_batch;
     }
 
     // Clean up
-    delete[] H_e;
-    delete[] M_e;
-    cudaFree(d_elements);
-    cudaFree(d_nodes);
+    delete[] m_star_values;
+    delete[] V_values;
 
     // Set matrices from triplets
     H.setFromTriplets(H_triplets.begin(), H_triplets.end());
