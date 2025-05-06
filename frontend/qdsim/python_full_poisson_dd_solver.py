@@ -126,16 +126,17 @@ class PythonFullPoissonDriftDiffusionSolver:
             doping = self.doping_profile(x, y)
 
             # Initialize carrier concentrations based on doping
+            # Assume fully ionized doping concentrations
             if doping > 0:
-                # n-type region
-                self.n[i] = doping
-                self.p[i] = ni * ni / doping
+                # n-type region (N_D > 0, N_A = 0)
+                self.n[i] = doping  # n = N_D (fully ionized donors)
+                self.p[i] = ni * ni / doping  # p*n = ni^2 (mass action law)
             elif doping < 0:
-                # p-type region
-                self.p[i] = -doping
-                self.n[i] = ni * ni / self.p[i]
+                # p-type region (N_D = 0, N_A > 0)
+                self.p[i] = -doping  # p = N_A (fully ionized acceptors)
+                self.n[i] = ni * ni / self.p[i]  # p*n = ni^2 (mass action law)
             else:
-                # Intrinsic region
+                # Intrinsic region (N_D = N_A = 0)
                 self.n[i] = ni
                 self.p[i] = ni
 
@@ -183,12 +184,13 @@ class PythonFullPoissonDriftDiffusionSolver:
             doping = self.doping_profile(x, y)
 
             # Compute charge density: rho = q * (p - n + N_D - N_A)
+            # Apply parity multipliers: +1 for holes (positive charge), -1 for electrons (negative charge)
             if self.use_gpu:
                 p_val = to_cpu(self.p[nearest_node])
                 n_val = to_cpu(self.n[nearest_node])
-                return self.q * (p_val - n_val + doping)
+                return self.q * (+1 * p_val - 1 * n_val + doping)
             else:
-                return self.q * (self.p[nearest_node] - self.n[nearest_node] + doping)
+                return self.q * (+1 * self.p[nearest_node] - 1 * self.n[nearest_node] + doping)
 
         # Initialize the potential with a linear profile between V_p and V_n
         print("Initializing potential with linear profile")
@@ -233,7 +235,8 @@ class PythonFullPoissonDriftDiffusionSolver:
                 doping = self.doping_profile(x, y)
 
                 # Calculate the residual for the Poisson equation
-                rho_i = self.q * (p_old[i] - n_old[i] + doping)
+                # Apply parity multipliers: +1 for holes (positive charge), -1 for electrons (negative charge)
+                rho_i = self.q * (+1 * p_old[i] - 1 * n_old[i] + doping)
                 residual += (rho_i - self._laplacian(phi_test_cpu, i))**2
 
             # Normalize the residual
@@ -424,7 +427,8 @@ class PythonFullPoissonDriftDiffusionSolver:
             doping = self.doping_profile(x, y)
 
             # Calculate the residual for the Poisson equation
-            rho_i = self.q * (p[i] - n[i] + doping)
+            # Apply parity multipliers: +1 for holes (positive charge), -1 for electrons (negative charge)
+            rho_i = self.q * (+1 * p[i] - 1 * n[i] + doping)
             residual_poisson += rho_i**2
 
             # Calculate the residual for the continuity equations

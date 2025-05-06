@@ -310,18 +310,20 @@ class PythonDriftDiffusionSolver:
                 p_c = (self.p[element[0]] + self.p[element[1]] + self.p[element[2]]) / 3.0
 
                 # Compute the current densities
-                # J_n = q * mu_n * n * grad(phi_n)
-                # J_p = -q * mu_p * p * grad(phi_p)
+                # J_n = q * mu_n * n * grad(phi_n) * (-1) for electrons (negative charge)
+                # J_p = q * mu_p * p * grad(phi_p) * (+1) for holes (positive charge)
                 # Check for NaN or Inf values
                 if np.isnan(n_c) or np.isinf(n_c) or np.isnan(dphi_n_dx) or np.isinf(dphi_n_dx) or np.isnan(dphi_n_dy) or np.isinf(dphi_n_dy):
                     J_n_elem = np.zeros(2)
                 else:
-                    J_n_elem = self.q * self.mu_n * n_c * np.array([dphi_n_dx, dphi_n_dy])
+                    # Apply parity multiplier -1 for electrons (negative charge)
+                    J_n_elem = -1 * self.q * self.mu_n * n_c * np.array([dphi_n_dx, dphi_n_dy])
 
                 if np.isnan(p_c) or np.isinf(p_c) or np.isnan(dphi_p_dx) or np.isinf(dphi_p_dx) or np.isnan(dphi_p_dy) or np.isinf(dphi_p_dy):
                     J_p_elem = np.zeros(2)
                 else:
-                    J_p_elem = -self.q * self.mu_p * p_c * np.array([dphi_p_dx, dphi_p_dy])
+                    # Apply parity multiplier +1 for holes (positive charge)
+                    J_p_elem = +1 * self.q * self.mu_p * p_c * np.array([dphi_p_dx, dphi_p_dy])
 
                 # Add to the average
                 J_n_avg += J_n_elem
