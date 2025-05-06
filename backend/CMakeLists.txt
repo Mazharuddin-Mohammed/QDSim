@@ -26,6 +26,41 @@ else()
     set(JSONCPP_LIBRARIES jsoncpp_lib)
 endif()
 
+# Find compression libraries
+find_package(LZ4)
+if(LZ4_FOUND)
+    include_directories(${LZ4_INCLUDE_DIRS})
+    add_definitions(-DUSE_LZ4)
+endif()
+
+find_package(ZSTD)
+if(ZSTD_FOUND)
+    include_directories(${ZSTD_INCLUDE_DIRS})
+    add_definitions(-DUSE_ZSTD)
+endif()
+
+find_package(Snappy)
+if(Snappy_FOUND)
+    include_directories(${Snappy_INCLUDE_DIRS})
+    add_definitions(-DUSE_SNAPPY)
+endif()
+
+find_package(BrotliDec)
+find_package(BrotliEnc)
+if(BrotliDec_FOUND AND BrotliEnc_FOUND)
+    include_directories(${BrotliDec_INCLUDE_DIRS} ${BrotliEnc_INCLUDE_DIRS})
+    add_definitions(-DUSE_BROTLI)
+endif()
+
+# Find NUMA libraries
+if(UNIX AND NOT APPLE)
+    find_package(NUMA)
+    if(NUMA_FOUND)
+        include_directories(${NUMA_INCLUDE_DIRS})
+        add_definitions(-DUSE_NUMA)
+    endif()
+endif()
+
 # Add MPI support (optional)
 option(USE_MPI "Enable MPI support" OFF)
 if(USE_MPI)
@@ -116,6 +151,11 @@ set(SOURCES
     src/gpu_memory_pool.cpp
     src/memory_efficient_sparse.cpp
     src/paged_matrix.cpp
+    src/memory_compression.cpp
+    src/memory_mapped_file.cpp
+    src/memory_mapped_matrix.cpp
+    src/numa_allocator.cpp
+    src/arena_allocator.cpp
 )
 
 # CUDA source files
@@ -137,6 +177,28 @@ pybind11_add_module(fe_interpolator_module src/fe_interpolator_module.cpp src/me
 # Link libraries
 target_link_libraries(qdsim_cpp PRIVATE ${JSONCPP_LIBRARIES})
 target_link_libraries(fe_interpolator_module PRIVATE ${JSONCPP_LIBRARIES})
+
+# Link compression libraries
+if(LZ4_FOUND)
+    target_link_libraries(qdsim_cpp PRIVATE ${LZ4_LIBRARIES})
+endif()
+
+if(ZSTD_FOUND)
+    target_link_libraries(qdsim_cpp PRIVATE ${ZSTD_LIBRARIES})
+endif()
+
+if(Snappy_FOUND)
+    target_link_libraries(qdsim_cpp PRIVATE ${Snappy_LIBRARIES})
+endif()
+
+if(BrotliDec_FOUND AND BrotliEnc_FOUND)
+    target_link_libraries(qdsim_cpp PRIVATE ${BrotliDec_LIBRARIES} ${BrotliEnc_LIBRARIES})
+endif()
+
+# Link NUMA libraries
+if(NUMA_FOUND)
+    target_link_libraries(qdsim_cpp PRIVATE ${NUMA_LIBRARIES})
+endif()
 
 if(USE_MPI)
     target_link_libraries(qdsim_cpp PRIVATE ${MPI_CXX_LIBRARIES})
