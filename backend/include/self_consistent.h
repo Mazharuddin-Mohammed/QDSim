@@ -91,6 +91,32 @@ public:
     const Eigen::VectorXd& get_p() const { return p; }
 
     /**
+     * @brief Gets the computed quasi-Fermi potential for electrons.
+     *
+     * @return The quasi-Fermi potential vector for electrons
+     */
+    const Eigen::VectorXd& get_phi_n() const { return phi_n; }
+
+    /**
+     * @brief Gets the computed quasi-Fermi potential for holes.
+     *
+     * @return The quasi-Fermi potential vector for holes
+     */
+    const Eigen::VectorXd& get_phi_p() const { return phi_p; }
+
+    /**
+     * @brief Calculates the built-in potential of the P-N junction.
+     *
+     * This method calculates the built-in potential of the P-N junction
+     * based on the doping concentrations and material properties.
+     *
+     * @param N_A The acceptor doping concentration
+     * @param N_D The donor doping concentration
+     * @return The built-in potential in volts
+     */
+    double calculate_built_in_potential(double N_A, double N_D) const;
+
+    /**
      * @brief Gets the electric field at a given position.
      *
      * @param x The x-coordinate of the position
@@ -133,6 +159,7 @@ private:
     Mesh& mesh;                          ///< Reference to the mesh used for the simulation
     PoissonSolver poisson;               ///< Poisson solver for the electrostatic potential
     Eigen::VectorXd n, p;                ///< Carrier concentrations (electrons and holes)
+    Eigen::VectorXd phi_n, phi_p;        ///< Quasi-Fermi potentials for electrons and holes
     Eigen::SparseMatrix<double> Kn, Kp;  ///< Drift-diffusion matrices for electrons and holes
 
     std::vector<Eigen::VectorXd> phi_history;  ///< History of potential vectors for Anderson acceleration
@@ -209,6 +236,16 @@ private:
      * @brief Solves the drift-diffusion equations for electron and hole transport.
      */
     void solve_drift_diffusion();
+
+    /**
+     * @brief Updates the quasi-Fermi potentials based on carrier concentrations.
+     *
+     * This method updates the quasi-Fermi potentials for electrons and holes
+     * based on the current carrier concentrations and material properties.
+     * The quasi-Fermi potentials are used to calculate the current densities
+     * and to ensure self-consistency in non-equilibrium conditions.
+     */
+    void update_quasi_fermi_potentials();
 
     /**
      * @brief Applies boundary conditions to the carrier concentrations.

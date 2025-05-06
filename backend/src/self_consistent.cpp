@@ -150,16 +150,29 @@ Materials::Material SelfConsistentSolver::get_material_at(double x, double y) co
     return materials[0];
 }
 
+/**
+ * @brief Initializes the carrier concentrations based on the doping concentrations.
+ *
+ * This function initializes the electron and hole concentrations based on the doping
+ * concentrations and proper physics. It calculates the carrier concentrations using
+ * the Boltzmann approximation and ensures charge neutrality in the bulk regions.
+ *
+ * The initialization process includes:
+ * 1. Calculating the intrinsic carrier concentration based on material properties
+ * 2. Determining the doping profile based on position
+ * 3. Computing the quasi-Fermi levels for electrons and holes
+ * 4. Calculating the carrier concentrations using the Boltzmann approximation
+ * 5. Ensuring charge neutrality in the bulk regions
+ *
+ * @param N_A The acceptor doping concentration
+ * @param N_D The donor doping concentration
+ */
 void SelfConsistentSolver::initialize_carriers(double N_A, double N_D) {
     // Constants
     const double kT = 0.0259; // eV at 300K
     const double kB = 8.617333262e-5; // Boltzmann constant in eV/K
     const double T = 300.0; // Temperature in K
     const double q = 1.602e-19; // Elementary charge in C
-
-    // Calculate intrinsic carrier concentration
-    // For GaAs at 300K, ni ≈ 2.1e6 cm^-3 = 2.1e-12 nm^-3
-    const double ni = 2.1e-12; // Intrinsic carrier concentration in nm^-3
 
     // Get the potential from the Poisson solver
     const Eigen::VectorXd& phi = poisson.get_potential();
@@ -172,12 +185,34 @@ void SelfConsistentSolver::initialize_carriers(double N_A, double N_D) {
         // Get material properties based on position
         Materials::Material mat = get_material_at(x, y);
 
-        // Calculate Fermi levels
-        double E_F_p = -mat.E_g + kB * T * std::log(mat.N_v / N_A);
-        double E_F_n = -kB * T * std::log(mat.N_c / N_D);
+        // Calculate intrinsic carrier concentration based on material properties
+        double ni = std::sqrt(mat.N_c * mat.N_v) * std::exp(-mat.E_g / (2.0 * kT));
+
+        // Determine doping profile based on position
+        // This can be replaced with a more complex doping profile function if needed
+        double N_A_pos, N_D_pos;
+        if (x < 0) {
+            // p-side
+            N_A_pos = N_A;
+            N_D_pos = 0.0;
+        } else {
+            // n-side
+            N_A_pos = 0.0;
+            N_D_pos = N_D;
+        }
+
+        // Calculate net doping
+        double N_net = N_D_pos - N_A_pos;
+
+        // Calculate built-in potential
+        double V_bi = kT * std::log(N_A * N_D / (ni * ni));
+
+        // Calculate quasi-Fermi levels
+        double E_F_p = -mat.E_g + kB * T * std::log(mat.N_v / std::max(N_A_pos, 1.0));
+        double E_F_n = -kB * T * std::log(mat.N_c / std::max(N_D_pos, 1.0));
 
         // Calculate carrier concentrations using the Boltzmann approximation
-        if (i < phi.size() && phi[i] != 0.0) {
+        if (i < phi.size() && std::abs(phi[i]) > 1e-10) {
             // Use the potential to calculate carrier concentrations
             double V = phi[i] / q; // Convert from V to eV
 
@@ -185,27 +220,46 @@ void SelfConsistentSolver::initialize_carriers(double N_A, double N_D) {
             double E_c = -q * V - (x < 0 ? E_F_p : E_F_n);
             double E_v = E_c - mat.E_g;
 
-            // Calculate carrier concentrations
+            // Calculate carrier concentrations using Boltzmann statistics
             n[i] = mat.N_c * std::exp(-E_c / kT);
             p[i] = mat.N_v * std::exp(E_v / kT);
         } else {
-            // Initial guess based on doping
-            if (x < 0) {
-                // p-side
-                n[i] = ni * ni / N_A; // Low electron concentration in p-side
-                p[i] = N_A;           // High hole concentration in p-side
+            // Initial guess based on doping and charge neutrality
+            if (N_net > 0) {
+                // n-type region
+                n[i] = N_net + std::sqrt(N_net * N_net + 4.0 * ni * ni) / 2.0;
+                p[i] = ni * ni / n[i];
+            } else if (N_net < 0) {
+                // p-type region
+                p[i] = -N_net + std::sqrt(N_net * N_net + 4.0 * ni * ni) / 2.0;
+                n[i] = ni * ni / p[i];
             } else {
-                // n-side
-                n[i] = N_D;           // High electron concentration in n-side
-                p[i] = ni * ni / N_D; // Low hole concentration in n-side
+                // Intrinsic region
+                n[i] = p[i] = ni;
             }
         }
 
         // Ensure minimum carrier concentrations for numerical stability
-        const double n_min = 1e-15; // Minimum concentration (nm^-3)
-        const double n_max = 1e-3;  // Maximum concentration (nm^-3)
+        const double n_min = 1e-10; // Minimum concentration (cm^-3)
+        const double n_max = 1e20;  // Maximum concentration (cm^-3)
         n[i] = std::max(std::min(n[i], n_max), n_min);
         p[i] = std::max(std::min(p[i], n_max), n_min);
+    }
+
+    // Initialize quasi-Fermi potentials
+    // These will be used in the self-consistent solution process
+    phi_n.resize(mesh.getNumNodes());
+    phi_p.resize(mesh.getNumNodes());
+
+    for (size_t i = 0; i < mesh.getNumNodes(); ++i) {
+        // Get material properties
+        double x = mesh.getNodes()[i][0];
+        double y = mesh.getNodes()[i][1];
+        Materials::Material mat = get_material_at(x, y);
+
+        // Calculate quasi-Fermi potentials
+        phi_n[i] = kT * std::log(n[i] / mat.N_c);
+        phi_p[i] = -kT * std::log(p[i] / mat.N_v) - mat.E_g;
     }
 }
 
@@ -516,6 +570,94 @@ void SelfConsistentSolver::solve_drift_diffusion() {
         n[i] = std::max(std::min(n[i], n_max), n_min);
         p[i] = std::max(std::min(p[i], n_max), n_min);
     }
+
+    // Update quasi-Fermi potentials based on the new carrier concentrations
+    update_quasi_fermi_potentials();
+}
+
+/**
+ * @brief Updates the quasi-Fermi potentials based on carrier concentrations.
+ *
+ * This method updates the quasi-Fermi potentials for electrons and holes
+ * based on the current carrier concentrations and material properties.
+ * The quasi-Fermi potentials are used to calculate the current densities
+ * and to ensure self-consistency in non-equilibrium conditions.
+ *
+ * The quasi-Fermi potentials are calculated as:
+ * phi_n = kT * ln(n / N_c)
+ * phi_p = -kT * ln(p / N_v) - E_g
+ *
+ * Where:
+ * - kT is the thermal voltage
+ * - n, p are the carrier concentrations
+ * - N_c, N_v are the effective densities of states
+ * - E_g is the band gap
+ */
+void SelfConsistentSolver::update_quasi_fermi_potentials() {
+    // Constants
+    const double kT = 0.0259; // eV at 300K
+
+    // Resize quasi-Fermi potential vectors if needed
+    if (phi_n.size() != mesh.getNumNodes()) {
+        phi_n.resize(mesh.getNumNodes());
+    }
+    if (phi_p.size() != mesh.getNumNodes()) {
+        phi_p.resize(mesh.getNumNodes());
+    }
+
+    // Update quasi-Fermi potentials for each node
+    for (size_t i = 0; i < mesh.getNumNodes(); ++i) {
+        // Get material properties
+        double x = mesh.getNodes()[i][0];
+        double y = mesh.getNodes()[i][1];
+        Materials::Material mat = get_material_at(x, y);
+
+        // Calculate quasi-Fermi potentials
+        phi_n[i] = kT * std::log(n[i] / mat.N_c);
+        phi_p[i] = -kT * std::log(p[i] / mat.N_v) - mat.E_g;
+    }
+}
+
+/**
+ * @brief Calculates the built-in potential of the P-N junction.
+ *
+ * This method calculates the built-in potential of the P-N junction
+ * based on the doping concentrations and material properties. The
+ * built-in potential is the potential difference between the p-side
+ * and the n-side in thermal equilibrium.
+ *
+ * The built-in potential is given by:
+ * V_bi = (kT/q) * ln(N_A * N_D / (n_i^2))
+ *
+ * Where:
+ * - kT is the thermal voltage
+ * - q is the elementary charge
+ * - N_A is the acceptor doping concentration
+ * - N_D is the donor doping concentration
+ * - n_i is the intrinsic carrier concentration
+ *
+ * @param N_A The acceptor doping concentration
+ * @param N_D The donor doping concentration
+ * @return The built-in potential in volts
+ */
+double SelfConsistentSolver::calculate_built_in_potential(double N_A, double N_D) const {
+    // Constants
+    const double kT = 0.0259; // eV at 300K
+
+    // Get material properties at the junction
+    // For simplicity, we'll use the material at x=0 (junction position)
+    Materials::Material mat = get_material_at(0.0, 0.0);
+
+    // Calculate intrinsic carrier concentration
+    double ni = std::sqrt(mat.N_c * mat.N_v) * std::exp(-mat.E_g / (2.0 * kT));
+
+    // Calculate built-in potential
+    double V_bi = kT * std::log(N_A * N_D / (ni * ni));
+
+    // Ensure the built-in potential is positive
+    V_bi = std::max(V_bi, 0.0);
+
+    return V_bi;
 }
 
 /**
@@ -1050,9 +1192,51 @@ double SelfConsistentSolver::perform_line_search(const Eigen::VectorXd& phi_old,
  * @param tolerance The convergence tolerance
  * @param max_iter The maximum number of iterations
  */
+/**
+ * @brief Solves the self-consistent Poisson-drift-diffusion equations.
+ *
+ * This function solves the self-consistent Poisson-drift-diffusion equations
+ * using an iterative approach with convergence acceleration techniques. It alternates
+ * between solving the Poisson equation and the drift-diffusion equations until
+ * convergence is reached or the maximum number of iterations is exceeded.
+ *
+ * The solution process includes:
+ * 1. Calculating the built-in potential based on doping concentrations
+ * 2. Initializing carrier concentrations and quasi-Fermi potentials
+ * 3. Solving the Poisson equation for the electrostatic potential
+ * 4. Solving the drift-diffusion equations for carrier transport
+ * 5. Applying boundary conditions and updating quasi-Fermi potentials
+ * 6. Iterating until convergence or maximum iterations
+ *
+ * @param V_p The voltage applied to the p-contact
+ * @param V_n The voltage applied to the n-contact
+ * @param N_A The acceptor doping concentration
+ * @param N_D The donor doping concentration
+ * @param tolerance The convergence tolerance
+ * @param max_iter The maximum number of iterations
+ */
 void SelfConsistentSolver::solve(double V_p, double V_n, double N_A, double N_D,
                                 double tolerance, int max_iter) {
     try {
+        // Calculate the built-in potential based on doping concentrations
+        double V_bi = calculate_built_in_potential(N_A, N_D);
+        std::cout << "Built-in potential: " << V_bi << " V" << std::endl;
+
+        // Adjust applied voltages to include built-in potential
+        double V_p_effective = V_p;
+        double V_n_effective = V_n;
+
+        // For reverse bias, add the built-in potential to the n-contact voltage
+        if (V_n > V_p) {
+            V_n_effective = V_n + V_bi;
+            std::cout << "Reverse bias: V_n_effective = " << V_n_effective << " V" << std::endl;
+        } else {
+            // For forward bias, subtract from the built-in potential
+            double V_forward = V_p - V_n;
+            V_n_effective = V_n + std::max(0.0, V_bi - V_forward);
+            std::cout << "Forward bias: V_n_effective = " << V_n_effective << " V" << std::endl;
+        }
+
         // Initialize carrier concentrations
         initialize_carriers(N_A, N_D);
 
@@ -1074,7 +1258,7 @@ void SelfConsistentSolver::solve(double V_p, double V_n, double N_A, double N_D,
         // Iterative solution
         for (int iter = 0; iter < max_iter; ++iter) {
             // Solve Poisson equation with current carrier concentrations
-            poisson.solve(V_p, V_n, n, p);
+            poisson.solve(V_p_effective, V_n_effective, n, p);
 
             // Get updated potential before acceleration
             Eigen::VectorXd phi_update = get_potential();
@@ -1096,13 +1280,16 @@ void SelfConsistentSolver::solve(double V_p, double V_n, double N_A, double N_D,
             Eigen::VectorXd phi_with_quantum = phi_new + V_q;
 
             // Update the potential in the Poisson solver and solve again
-            poisson.update_and_solve(phi_with_quantum, V_p, V_n, n, p);
+            poisson.update_and_solve(phi_with_quantum, V_p_effective, V_n_effective, n, p);
 
             // Solve drift-diffusion equations with accelerated potential
             solve_drift_diffusion();
 
             // Apply boundary conditions
-            apply_boundary_conditions(V_p, V_n);
+            apply_boundary_conditions(V_p_effective, V_n_effective);
+
+            // Update quasi-Fermi potentials
+            update_quasi_fermi_potentials();
 
             // Check convergence
             double error = (phi_new - phi_old).norm() / phi_new.norm();
@@ -1156,9 +1343,31 @@ void SelfConsistentSolver::solve(double V_p, double V_n, double N_A, double N_D,
         }
     } catch (const std::exception& e) {
         std::cerr << "Error in SelfConsistentSolver::solve: " << e.what() << std::endl;
+
+        // Calculate the built-in potential for the fallback solution
+        double V_bi = calculate_built_in_potential(N_A, N_D);
+
+        // Adjust applied voltages to include built-in potential
+        double V_p_effective = V_p;
+        double V_n_effective = V_n;
+
+        // For reverse bias, add the built-in potential to the n-contact voltage
+        if (V_n > V_p) {
+            V_n_effective = V_n + V_bi;
+        } else {
+            // For forward bias, subtract from the built-in potential
+            double V_forward = V_p - V_n;
+            V_n_effective = V_n + std::max(0.0, V_bi - V_forward);
+        }
+
         // Initialize with a simple solution to avoid crashing
         initialize_carriers(N_A, N_D);
-        poisson.solve(V_p, V_n, n, p);
+        poisson.solve(V_p_effective, V_n_effective, n, p);
+
+        // Update quasi-Fermi potentials
+        update_quasi_fermi_potentials();
+
+        std::cerr << "Initialized with fallback solution" << std::endl;
     }
 }
 
