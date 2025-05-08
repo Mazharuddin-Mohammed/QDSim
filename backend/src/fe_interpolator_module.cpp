@@ -1,3 +1,14 @@
+/**
+ * @file fe_interpolator_module.cpp
+ * @brief Python bindings for the FEInterpolator class.
+ *
+ * This file contains the Python bindings for the FEInterpolator class,
+ * which provides methods for interpolating fields on finite element meshes.
+ * It uses pybind11 to expose the C++ classes and methods to Python.
+ *
+ * Author: Dr. Mazharuddin Mohammed
+ */
+
 #include <pybind11/pybind11.h>
 #include <pybind11/eigen.h>
 #include <pybind11/stl.h>
@@ -12,7 +23,7 @@ PYBIND11_MODULE(fe_interpolator_module, m) {
     m.doc() = "Python bindings for the FEInterpolator class";
 
     // First expose the Mesh class since FEInterpolator depends on it
-    py::class_<Mesh>(m, "FEMesh")
+    py::class_<Mesh>(m, "Mesh")
         .def(py::init<double, double, int, int, int>())
         .def("get_nodes", &Mesh::getNodes)
         .def("get_elements", &Mesh::getElements)

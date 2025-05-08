@@ -1,3 +1,14 @@
+/**
+ * @file normalization.cpp
+ * @brief Implementation of the Normalizer class for wavefunction normalization.
+ *
+ * This file contains the implementation of the Normalizer class, which provides
+ * methods for normalizing wavefunctions according to various normalization schemes,
+ * including delta-function normalization for scattering states.
+ *
+ * Author: Dr. Mazharuddin Mohammed
+ */
+
 #include "normalization.h"
 #include <cmath>
 

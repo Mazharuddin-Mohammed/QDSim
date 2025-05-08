@@ -1,0 +1,44 @@
+# QDSim batch configuration file
+base_config:
+  # Domain size in nm
+  lx: 200
+  ly: 100
+
+  # Mesh parameters
+  nx: 101
+  ny: 51
+  element_order: 1
+
+  # Materials
+  qd_material: InAs
+  matrix_material: GaAs
+  diode_p_material: GaAs
+  diode_n_material: GaAs
+
+  # Quantum dot parameters
+  r: 10  # radius in nm
+  v_0: 0.5  # potential depth in eV
+  potential_type: gaussian
+
+  # Diode parameters
+  n_a: 1.0e+24  # acceptor concentration in m^-3
+  n_d: 1.0e+24  # donor concentration in m^-3
+  v_r: 0.0  # reverse bias in V
+
+  # Solver parameters
+  tolerance: 1.0e-6
+  max_iter: 100
+  use_mpi: false
+
+parameter_sweeps:
+  - name: QD Radius Sweep
+    parameter: r
+    values: [5, 7.5, 10, 12.5, 15]
+    
+  - name: Potential Depth Sweep
+    parameter: v_0
+    values: [0.1, 0.2, 0.3, 0.4, 0.5]
+    
+  - name: Reverse Bias Sweep
+    parameter: v_r
+    values: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]

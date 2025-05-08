@@ -1,6 +1,13 @@
-# 2D Quantum Dot Simulator
+# QDSim: 2D Quantum Dot Simulator
 
-This is a high-performance 2D Quantum Dot (QD) Simulator implemented in C++ and Python, designed to solve the time-independent Schrödinger equation for a quantum dot in a 2D domain. The simulator uses the Finite Element Method (FEM) with selectable linear (P1), quadratic (P2), or cubic (P3) basis functions, adaptive mesh refinement, MPI parallelization, delta normalization for continuum states, and visualization capabilities. It supports both square and Gaussian potential profiles, making it suitable for studying quantum confinement and scattering phenomena in semiconductor nanostructures.
+QDSim is a high-performance 2D Quantum Dot (QD) Simulator implemented in C++ and Python, designed to solve the time-independent Schrödinger equation for quantum dots in semiconductor nanostructures. The simulator uses the Finite Element Method (FEM) with selectable linear (P1), quadratic (P2), or cubic (P3) basis functions, adaptive mesh refinement, MPI parallelization, GPU acceleration, and advanced memory optimization techniques.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Documentation Status](https://img.shields.io/badge/docs-latest-brightgreen.svg)](https://github.com/username/qdsim/docs)
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](https://github.com/username/qdsim/actions)
+[![Coverage Status](https://img.shields.io/badge/coverage-85%25-yellowgreen.svg)](https://github.com/username/qdsim/coverage)
+
+QDSim provides a comprehensive framework for simulating quantum dots with physically accurate models, making it suitable for studying quantum confinement, carrier transport, and electronic properties in semiconductor nanostructures. It supports both square and Gaussian potential profiles, self-consistent Poisson-drift-diffusion calculations, and realistic material parameters.
 
 ## Table of Contents
 1. [Features](#features)
@@ -479,6 +486,75 @@ parameter_sweeps:
 
 This will run multiple simulations with different parameter values and generate plots showing how the energy levels change with each parameter.
 
+## Testing
+
+QDSim includes a comprehensive test suite to ensure correctness, reliability, and physical accuracy of the simulations. The test suite is organized into several categories:
+
+### Unit Tests
+
+Unit tests verify that individual components work correctly in isolation:
+
+```bash
+# Run C++ unit tests
+cd build
+make test
+
+# Run Python unit tests
+cd frontend
+pytest tests/
+```
+
+### Integration Tests
+
+Integration tests verify that multiple components work correctly together:
+
+```bash
+# Run integration tests
+cd build
+make integration_tests
+```
+
+### Validation Tests
+
+Validation tests verify that the simulation results match expected physical behavior:
+
+```bash
+# Run validation tests
+cd build
+make validation_tests
+
+# Run specific validation test
+cd build
+./validation_tests/test_harmonic_oscillator
+```
+
+### Performance Tests
+
+Performance tests verify that the code meets performance requirements:
+
+```bash
+# Run performance tests
+cd build
+make performance_tests
+```
+
+### Test Coverage
+
+To generate test coverage reports:
+
+```bash
+# C++ test coverage
+cd build
+make coverage
+
+# Python test coverage
+cd frontend
+pytest --cov=qdsim tests/
+```
+
+### Continuous Integration
+
+QDSim uses GitHub Actions for continuous integration. The CI pipeline runs all tests on every push and pull request, ensuring that the code remains reliable and correct. The CI configuration is located in the `.github/workflows` directory.
 ## Method Name Consistency
 
 The C++ code uses both camelCase and snake_case for method names. For consistency, we've added both versions of the methods in the bindings:

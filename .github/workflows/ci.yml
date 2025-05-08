@@ -1,0 +1,294 @@
+name: QDSim CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  build-and-test-cpp:
+    name: Build and Test C++
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        build_type: [Debug, Release]
+        include:
+          - os: ubuntu-latest
+            c_compiler: gcc
+            cxx_compiler: g++
+          - os: macos-latest
+            c_compiler: clang
+            cxx_compiler: clang++
+          - os: windows-latest
+            c_compiler: cl
+            cxx_compiler: cl
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install dependencies (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential libeigen3-dev libopenmpi-dev
+
+    - name: Install dependencies (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        brew install cmake eigen open-mpi
+
+    - name: Install dependencies (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        choco install cmake
+        # Download and install Eigen
+        Invoke-WebRequest -Uri "https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.zip" -OutFile "eigen.zip"
+        Expand-Archive -Path "eigen.zip" -DestinationPath "C:\"
+        # Set environment variable for Eigen
+        echo "EIGEN3_INCLUDE_DIR=C:\eigen-3.4.0" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+    - name: Configure CMake
+      run: |
+        mkdir -p build
+        cd build
+        cmake .. -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DCMAKE_C_COMPILER=${{ matrix.c_compiler }} -DCMAKE_CXX_COMPILER=${{ matrix.cxx_compiler }} -DBUILD_TESTING=ON
+
+    - name: Build
+      run: |
+        cd build
+        cmake --build . --config ${{ matrix.build_type }}
+
+    - name: Run tests
+      run: |
+        cd build
+        ctest -C ${{ matrix.build_type }} --output-on-failure
+
+  code-coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential libeigen3-dev libopenmpi-dev lcov
+
+    - name: Configure CMake with coverage
+      run: |
+        mkdir -p build
+        cd build
+        cmake .. -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON
+
+    - name: Build
+      run: |
+        cd build
+        cmake --build .
+
+    - name: Run tests
+      run: |
+        cd build
+        ctest --output-on-failure
+
+    - name: Generate coverage report
+      run: |
+        cd build
+        make coverage
+
+    - name: Upload coverage report
+      uses: codecov/codecov-action@v3
+      with:
+        directory: ./build/coverage
+        fail_ci_if_error: true
+
+  python-tests:
+    name: Python Tests
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ['3.8', '3.9', '3.10']
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential libeigen3-dev libopenmpi-dev
+
+    - name: Install dependencies (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        brew install cmake eigen open-mpi
+
+    - name: Install dependencies (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        choco install cmake
+        # Download and install Eigen
+        Invoke-WebRequest -Uri "https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.zip" -OutFile "eigen.zip"
+        Expand-Archive -Path "eigen.zip" -DestinationPath "C:\"
+        # Set environment variable for Eigen
+        echo "EIGEN3_INCLUDE_DIR=C:\eigen-3.4.0" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest pytest-cov numpy scipy matplotlib pyside6
+
+    - name: Build and install package
+      run: |
+        pip install -e .
+
+    - name: Run Python tests
+      run: |
+        cd frontend
+        pytest --cov=qdsim tests/
+
+    - name: Upload coverage report
+      uses: codecov/codecov-action@v3
+      with:
+        fail_ci_if_error: true
+
+  static-analysis:
+    name: Static Analysis
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang-tidy cppcheck
+
+    - name: Run clang-tidy
+      run: |
+        find backend/src backend/include -name "*.cpp" -o -name "*.h" | xargs clang-tidy -p build
+
+    - name: Run cppcheck
+      run: |
+        cppcheck --enable=all --suppress=missingIncludeSystem --error-exitcode=1 backend/src backend/include
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install Python linting tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 pylint mypy
+
+    - name: Run flake8
+      run: |
+        flake8 frontend/qdsim tests
+
+    - name: Run pylint
+      run: |
+        pylint frontend/qdsim tests
+
+    - name: Run mypy
+      run: |
+        mypy frontend/qdsim
+
+  documentation:
+    name: Documentation
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y doxygen graphviz
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install Python documentation tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install sphinx sphinx_rtd_theme breathe
+
+    - name: Generate Doxygen documentation
+      run: |
+        cd docs
+        doxygen Doxyfile
+
+    - name: Generate Sphinx documentation
+      run: |
+        cd docs
+        make html
+
+    - name: Deploy documentation
+      uses: peaceiris/actions-gh-pages@v3
+      if: github.ref == 'refs/heads/main'
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./docs/_build/html
+
+  validation-tests:
+    name: Validation Tests
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential libeigen3-dev libopenmpi-dev
+
+    - name: Configure CMake
+      run: |
+        mkdir -p build
+        cd build
+        cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_VALIDATION_TESTS=ON
+
+    - name: Build
+      run: |
+        cd build
+        cmake --build .
+
+    - name: Run validation tests
+      run: |
+        cd build
+        make validation_tests
+
+  performance-tests:
+    name: Performance Tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential libeigen3-dev libopenmpi-dev
+
+    - name: Configure CMake
+      run: |
+        mkdir -p build
+        cd build
+        cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_PERFORMANCE_TESTS=ON
+
+    - name: Build
+      run: |
+        cd build
+        cmake --build .
+
+    - name: Run performance tests
+      run: |
+        cd build
+        make performance_tests

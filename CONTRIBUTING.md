@@ -107,9 +107,9 @@ By participating in this project, you agree to abide by our Code of Conduct. Ple
   ```cpp
   #ifndef QDSIM_MODULE_HEADER_H_
   #define QDSIM_MODULE_HEADER_H_
-  
+
   // Code here
-  
+
   #endif  // QDSIM_MODULE_HEADER_H_
   ```
 
@@ -162,17 +162,17 @@ By participating in this project, you agree to abide by our Code of Conduct. Ple
   ```python
   def function_name(param1, param2):
       """Brief description of the function.
-      
+
       Detailed description of the function, including any important notes
       or implementation details.
-      
+
       Args:
           param1: Description of first parameter
           param2: Description of second parameter
-          
+
       Returns:
           Description of return value
-          
+
       Raises:
           ExceptionType: Description of when this exception is raised
       """
@@ -188,29 +188,186 @@ By participating in this project, you agree to abide by our Code of Conduct. Ple
 
 ## Testing Guidelines
 
-### C++ Tests
+QDSim requires comprehensive testing to ensure correctness, reliability, and physical accuracy. The test suite is organized into several categories:
+
+### Unit Tests
+
+Unit tests verify that individual components work correctly in isolation:
 
 - Use Catch2 for C++ unit tests
-- Aim for at least 80% code coverage
-- Test both normal and edge cases
-- Use descriptive test names that explain what is being tested
-- Organize tests in a logical hierarchy using TEST_CASE and SECTION
-- Mock external dependencies when necessary
-
-### Python Tests
-
 - Use pytest for Python unit tests
-- Use pytest fixtures for setup and teardown
-- Use parametrized tests for testing multiple inputs
+- Aim for at least 90% code coverage
 - Test both normal and edge cases
 - Use descriptive test names that explain what is being tested
+- Organize C++ tests in a logical hierarchy using TEST_CASE and SECTION
+- Use pytest fixtures for setup and teardown in Python tests
+- Use parametrized tests for testing multiple inputs
 - Mock external dependencies when necessary
+
+Example C++ unit test:
+```cpp
+TEST_CASE("Mesh refinement", "[mesh]") {
+    // Arrange
+    Mesh mesh(10, 10);
+    std::vector<bool> refinement_flags(mesh.getNumElements(), false);
+    refinement_flags[0] = true;
+
+    // Act
+    int new_elements = mesh.refine(refinement_flags);
+
+    // Assert
+    REQUIRE(new_elements > 0);
+    REQUIRE(mesh.getNumElements() > 10);
+
+    SECTION("Refinement preserves mesh quality") {
+        // Additional tests for mesh quality
+        REQUIRE(mesh.getMinQuality() > 0.1);
+    }
+}
+```
+
+Example Python unit test:
+```python
+@pytest.fixture
+def mesh():
+    """Create a test mesh."""
+    return Mesh(10, 10)
+
+def test_refine_creates_new_elements(mesh):
+    # Arrange
+    refinement_flags = [False] * mesh.get_num_elements()
+    refinement_flags[0] = True
+
+    # Act
+    new_elements = mesh.refine(refinement_flags)
+
+    # Assert
+    assert new_elements > 0
+    assert mesh.get_num_elements() > 10
+```
 
 ### Integration Tests
 
-- Write integration tests that test the interaction between components
-- Include end-to-end tests that simulate real-world usage
-- Test performance and scalability where appropriate
+Integration tests verify that multiple components work correctly together:
+
+- Test interactions between components
+- Use real dependencies where possible
+- Verify end-to-end workflows
+- Test error handling and edge cases
+- Include tests for MPI and GPU acceleration
+
+Example integration test:
+```cpp
+TEST_CASE("FEM solver with adaptive mesh refinement", "[integration]") {
+    // Arrange
+    Simulator simulator;
+    simulator.setDomain(-10.0, 10.0, -10.0, 10.0);
+    simulator.setMeshSize(20, 20);
+    simulator.setPotential(PotentialType::HARMONIC);
+    simulator.setAdaptiveMeshRefinement(true);
+
+    // Act
+    auto result = simulator.run(5);
+
+    // Assert
+    REQUIRE(result.eigenvalues.size() == 5);
+    REQUIRE(simulator.getMesh().getNumElements() > 400);  // Mesh should be refined
+
+    // Check eigenvalues against analytical solution for harmonic oscillator
+    REQUIRE(result.eigenvalues[0] == Approx(1.0).epsilon(0.05));
+    REQUIRE(result.eigenvalues[1] == Approx(2.0).epsilon(0.05));
+    REQUIRE(result.eigenvalues[2] == Approx(2.0).epsilon(0.05));
+}
+```
+
+### Validation Tests
+
+Validation tests verify that the simulation results match expected physical behavior:
+
+- Compare simulation results with analytical solutions
+- Verify physical accuracy
+- Test edge cases and boundary conditions
+- Include tests for different material parameters
+- Validate against experimental data when available
+
+Example validation test:
+```cpp
+TEST_CASE("Harmonic oscillator eigenvalues", "[validation]") {
+    // Arrange
+    Simulator simulator;
+    simulator.setPotential(PotentialType::HARMONIC);
+    simulator.setDomain(-10.0, 10.0, -10.0, 10.0);
+    simulator.setMeshSize(100, 100);
+
+    // Act
+    auto result = simulator.run(10);
+
+    // Assert
+    // For a 2D harmonic oscillator, eigenvalues should be E_n,m = (n + m + 1) * hbar * omega
+    double hbar_omega = 1.0;  // Assuming normalized units
+    REQUIRE(result.eigenvalues[0] == Approx(1.0 * hbar_omega).epsilon(0.01));
+    REQUIRE(result.eigenvalues[1] == Approx(2.0 * hbar_omega).epsilon(0.01));
+    REQUIRE(result.eigenvalues[2] == Approx(2.0 * hbar_omega).epsilon(0.01));
+    REQUIRE(result.eigenvalues[3] == Approx(3.0 * hbar_omega).epsilon(0.01));
+}
+```
+
+### Performance Tests
+
+Performance tests verify that the code meets performance requirements:
+
+- Measure execution time
+- Measure memory usage
+- Compare against baseline performance
+- Test scalability with problem size
+- Test parallel performance with different numbers of processes/threads
+- Test GPU acceleration
+
+Example performance test:
+```cpp
+TEST_CASE("Mesh refinement performance", "[performance]") {
+    // Arrange
+    Mesh mesh = generateLargeMesh();
+    std::vector<bool> refinement_flags(mesh.getNumElements(), false);
+    for (int i = 0; i < refinement_flags.size(); i += 10) {
+        refinement_flags[i] = true;
+    }
+
+    // Act
+    auto start = std::chrono::high_resolution_clock::now();
+    mesh.refine(refinement_flags);
+    auto end = std::chrono::high_resolution_clock::now();
+
+    // Assert
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    REQUIRE(duration.count() < 1000);  // Should complete in less than 1 second
+}
+```
+
+### Test Coverage
+
+To generate test coverage reports:
+
+```bash
+# C++ test coverage
+cd build
+cmake -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON ..
+make
+make test
+make coverage
+
+# Python test coverage
+cd frontend
+pytest --cov=qdsim tests/
+```
+
+Aim for at least 90% code coverage for critical components and at least 80% overall.
+
+### Continuous Integration
+
+QDSim uses GitHub Actions for continuous integration. The CI pipeline runs all tests on every push and pull request, ensuring that the code remains reliable and correct. The CI configuration is located in the `.github/workflows` directory.
+
+When adding new features or fixing bugs, make sure to add appropriate tests to verify the changes.
 
 ## Pull Request Process
 

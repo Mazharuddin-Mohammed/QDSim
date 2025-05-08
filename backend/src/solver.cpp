@@ -57,24 +57,29 @@ EigenSolver::EigenSolver(FEMSolver& fem) : fem(fem) {}
  * @throws std::invalid_argument If num_eigenvalues is invalid
  */
 void EigenSolver::solve(int num_eigenvalues) {
+    // Validate input parameters
+    QDSIM_VALIDATE_SOLVER_PARAMETERS(num_eigenvalues, 1e-10, 1000);
+
     // Get the Hamiltonian and mass matrices from the FEMSolver
     const Eigen::SparseMatrix<std::complex<double>>& H = fem.get_H();
     const Eigen::SparseMatrix<std::complex<double>>& M = fem.get_M();
 
     // Check if matrices are valid
     if (H.rows() == 0 || M.rows() == 0) {
-        std::cerr << "Error: Matrices H and M must be initialized before solving" << std::endl;
-        return;
+        QDSIM_THROW(ErrorHandling::ErrorCode::SOLVER_INITIALIZATION_FAILED,
+                   "Matrices H and M must be initialized before solving");
     }
 
     // Check if matrices have the same dimensions
     if (H.rows() != M.rows() || H.cols() != M.cols()) {
-        std::cerr << "Error: Matrices H and M must have the same dimensions" << std::endl;
-        return;
+        QDSIM_THROW(ErrorHandling::ErrorCode::MATRIX_DIMENSION_MISMATCH,
+                   "Matrices H and M must have the same dimensions");
     }
 
     // Solve the generalized eigenvalue problem H psi = E M psi
     try {
+        QDSIM_LOG_INFO("Starting eigenvalue computation for " + std::to_string(num_eigenvalues) + " states");
+
         // Convert sparse matrices to dense
         Eigen::MatrixXcd H_dense = Eigen::MatrixXcd(H);
         Eigen::MatrixXcd M_dense = Eigen::MatrixXcd(M);
@@ -86,7 +91,24 @@ void EigenSolver::solve(int num_eigenvalues) {
         // Compute the Cholesky decomposition of M
         Eigen::LLT<Eigen::MatrixXcd> llt(M_dense);
         if (llt.info() != Eigen::Success) {
-            throw std::runtime_error("Cholesky decomposition failed. M is not positive definite.");
+            // Try to recover by adding a small regularization term
+            QDSIM_LOG_WARNING("Cholesky decomposition failed. Attempting to regularize the mass matrix.");
+
+            // Add a small regularization term to the diagonal
+            double reg = 1e-10 * M_dense.diagonal().real().maxCoeff();
+            for (int i = 0; i < M_dense.rows(); ++i) {
+                M_dense(i, i) += std::complex<double>(reg, 0.0);
+            }
+
+            // Try the Cholesky decomposition again
+            llt.compute(M_dense);
+
+            if (llt.info() != Eigen::Success) {
+                QDSIM_THROW(ErrorHandling::ErrorCode::MATRIX_NOT_POSITIVE_DEFINITE,
+                           "Cholesky decomposition failed even after regularization. M is not positive definite.");
+            }
+
+            QDSIM_LOG_INFO("Regularization successful. Continuing with eigenvalue computation.");
         }
 
         // Get the L matrix from the decomposition (M = L·L†)
@@ -106,7 +128,8 @@ void EigenSolver::solve(int num_eigenvalues) {
         Eigen::SelfAdjointEigenSolver<Eigen::MatrixXcd> es(A);
 
         if (es.info() != Eigen::Success) {
-            throw std::runtime_error("Eigenvalue computation failed");
+            QDSIM_THROW(ErrorHandling::ErrorCode::EIGENVALUE_COMPUTATION_FAILED,
+                       "Eigenvalue computation failed");
         }
 
         // Extract eigenvalues and eigenvectors
@@ -119,6 +142,11 @@ void EigenSolver::solve(int num_eigenvalues) {
         // Normalize eigenvectors with respect to M: y†·M·y = 1
         for (int i = 0; i < evecs.cols(); ++i) {
             std::complex<double> norm = std::sqrt(evecs.col(i).dot(M_dense * evecs.col(i)));
+            if (std::abs(norm) < 1e-10) {
+                QDSIM_LOG_WARNING("Small normalization factor for eigenvector " + std::to_string(i) +
+                                 ". This may indicate numerical instability.");
+                norm = std::complex<double>(1e-10, 0.0);
+            }
             evecs.col(i) /= norm;
         }
 
@@ -131,12 +159,41 @@ void EigenSolver::solve(int num_eigenvalues) {
             eigenvalues[i] = std::complex<double>(evals(i), 0.0);
             // Store the real part of the eigenvectors
             eigenvectors[i] = evecs.col(i).real();
+
+            // Check for NaN or infinity in eigenvalues and eigenvectors
+            if (!std::isfinite(evals(i))) {
+                QDSIM_LOG_WARNING("Non-finite eigenvalue detected: E" + std::to_string(i) + " = " +
+                                 std::to_string(evals(i)));
+            }
+
+            if (!eigenvectors[i].allFinite()) {
+                QDSIM_LOG_WARNING("Non-finite values detected in eigenvector " + std::to_string(i));
+            }
         }
 
-    } catch (const std::exception& e) {
-        std::cerr << "Error solving eigenvalue problem: " << e.what() << std::endl;
+        QDSIM_LOG_INFO("Eigenvalue computation completed successfully");
 
-        // Return dummy values
+    } catch (const ErrorHandling::QDSimException& e) {
+        // Try to recover using the recovery manager
+        QDSIM_LOG_ERROR("Error in eigenvalue computation: " + std::string(e.what()));
+
+        bool recovered = false;
+
+        // Try to recover using the fallback algorithm
+        if (e.code() == ErrorHandling::ErrorCode::MATRIX_NOT_POSITIVE_DEFINITE) {
+            recovered = QDSIM_RECOVER(e, Recovery::RecoveryStrategy::FALLBACK_ALGORITHM);
+        }
+
+        if (!recovered) {
+            // If recovery failed, return dummy values
+            QDSIM_LOG_ERROR("Recovery failed. Returning dummy values.");
+            eigenvalues.resize(num_eigenvalues, std::complex<double>(0.0, 0.0));
+            eigenvectors.resize(num_eigenvalues, Eigen::VectorXd::Zero(H.rows()));
+        }
+    } catch (const std::exception& e) {
+        // For other exceptions, log the error and return dummy values
+        QDSIM_LOG_ERROR("Unhandled exception in eigenvalue computation: " + std::string(e.what()));
+
         eigenvalues.resize(num_eigenvalues, std::complex<double>(0.0, 0.0));
         eigenvectors.resize(num_eigenvalues, Eigen::VectorXd::Zero(H.rows()));
     }

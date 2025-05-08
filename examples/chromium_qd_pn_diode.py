@@ -197,7 +197,7 @@ def main():
     # P-N junction configuration
     config.N_A = 1e24  # 1e18 cm^-3 = 1e24 m^-3
     config.N_D = 1e24  # 1e18 cm^-3 = 1e24 m^-3
-    config.depletion_width = 100e-9  # 100 nm
+    config.depletion_width = 50e-9  # 50 nm (as specified)
     config.V_r = 1.0  # 1.0 V reverse bias
 
     # Calculate built-in potential for display
@@ -207,6 +207,10 @@ def main():
     print(f"Built-in potential: {built_in:.3f} V")
     print(f"Reverse bias: {config.V_r:.1f} V")
     print(f"Total junction potential: {built_in + config.V_r:.3f} V")
+
+    # Print junction parameters
+    print(f"P-N junction position: x={config.junction_position*1e9:.1f}nm")
+    print(f"Depletion width: {config.depletion_width*1e9:.1f}nm")
 
     # Quantum dot configuration
     config.qd_material = "Chromium"  # QD material (will use effective mass from this)

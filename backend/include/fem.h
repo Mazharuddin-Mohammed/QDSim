@@ -23,9 +23,18 @@
  */
 
 #include "mesh.h"
+#include "self_consistent.h"
 #include "poisson.h"
 #include "fe_interpolator.h"
+#include "error_estimator.h"
+#include "mesh_quality.h"
+#include "adaptive_refinement.h"
 #include <Eigen/Sparse>
+#include <Eigen/Dense>
+#include <complex>
+#include <vector>
+#include <string>
+#include <functional>
 #ifdef USE_MPI
 #include <mpi.h>
 #endif
@@ -53,7 +62,7 @@ public:
      * @param m_star Function that returns the effective mass at a given position
      * @param V Function that returns the potential at a given position
      * @param cap Function that returns the capacitance at a given position
-     * @param poisson The Poisson solver to use for electrostatic calculations
+     * @param sc_solver The self-consistent solver to use for electrostatic calculations
      * @param order The order of the finite elements (1 for P1, 2 for P2, 3 for P3)
      * @param use_mpi Whether to use MPI for parallel computations (only effective if compiled with USE_MPI)
      *
@@ -62,7 +71,30 @@ public:
      *       the use_mpi parameter will be ignored and serial execution will be used.
      */
     FEMSolver(Mesh& mesh, double (*m_star)(double, double), double (*V)(double, double),
-              double (*cap)(double, double), PoissonSolver& poisson, int order, bool use_mpi = true);
+              double (*cap)(double, double), SelfConsistentSolver& sc_solver, int order, bool use_mpi = false);
+
+    /**
+     * @brief Sets the potential values at mesh nodes for interpolation.
+     *
+     * This method sets the potential values at mesh nodes for proper finite element
+     * interpolation. The potential values are used in the assemble_element_matrix method.
+     *
+     * @param potential_values The potential values at mesh nodes
+     *
+     * @throws std::invalid_argument If the potential_values vector has an invalid size
+     */
+    void set_potential_values(const Eigen::VectorXd& potential_values);
+
+    /**
+     * @brief Enables or disables the use of interpolated potentials.
+     *
+     * When enabled, the solver will use finite element interpolation for potentials
+     * instead of calling the V function directly. This provides more accurate results,
+     * especially for higher-order elements.
+     *
+     * @param enable Whether to enable interpolated potentials
+     */
+    void use_interpolated_potential(bool enable);
     /**
      * @brief Destroys the FEMSolver object.
      */
@@ -121,6 +153,19 @@ public:
 #endif
     }
 
+#ifdef USE_MPI
+    /**
+     * @brief Enables or disables MPI for parallel computations.
+     *
+     * This method allows enabling or disabling MPI at runtime. When enabled,
+     * the solver will use MPI for parallel matrix assembly and mesh refinement.
+     * When disabled, the solver will use serial implementations.
+     *
+     * @param enable Whether to enable MPI
+     */
+    void enable_mpi(bool enable);
+#endif
+
     /**
      * @brief Gets the finite element interpolator.
      *
@@ -133,8 +178,8 @@ private:
     Mesh& mesh;
 
     /** @brief Reference to the Poisson solver used for electrostatic calculations */
-    PoissonSolver& poisson;
-
+    // PoissonSolver& poisson;
+    SelfConsistentSolver& sc_solver;
     /** @brief Hamiltonian matrix (sparse complex matrix) */
     Eigen::SparseMatrix<std::complex<double>> H;
 
@@ -158,6 +203,57 @@ private:
 
     /** @brief Finite element interpolator for field interpolation */
     FEInterpolator* interpolator;
+
+    /** @brief Potential values at mesh nodes for interpolation */
+    Eigen::VectorXd potential_values;
+
+    /** @brief Flag to enable/disable interpolated potentials */
+    bool use_interpolation;
+
+    /**
+     * @brief Maps a point from the reference element to the physical element.
+     *
+     * This method maps a point from the reference element (unit triangle) to the
+     * physical element using linear interpolation.
+     *
+     * @param ref_point The point in the reference element
+     * @param nodes The nodes of the physical element
+     * @return Eigen::Vector2d The corresponding point in the physical element
+     */
+    Eigen::Vector2d map_reference_to_physical(const Eigen::Vector2d& ref_point,
+                                            const std::vector<Eigen::Vector2d>& nodes) const;
+
+    /**
+     * @brief Evaluates the shape functions and their gradients at a point.
+     *
+     * This method evaluates the shape functions and their gradients at a point
+     * in the reference element.
+     *
+     * @param ref_point The point in the reference element
+     * @param shape_values Output parameter for the shape function values
+     * @param shape_gradients Output parameter for the shape function gradients
+     * @param nodes The nodes of the physical element
+     * @param order The order of the finite elements
+     */
+    void evaluate_shape_functions(const Eigen::Vector2d& ref_point,
+                                std::vector<double>& shape_values,
+                                std::vector<Eigen::Vector2d>& shape_gradients,
+                                const std::vector<Eigen::Vector2d>& nodes,
+                                int order) const;
+
+    /**
+     * @brief Maps gradients from the reference element to the physical element.
+     *
+     * This method maps gradients from the reference element to the physical element
+     * using the Jacobian of the transformation.
+     *
+     * @param ref_gradients The gradients in the reference element
+     * @param phys_gradients Output parameter for the gradients in the physical element
+     * @param nodes The nodes of the physical element
+     */
+    void map_gradients_to_physical(const std::vector<Eigen::Vector2d>& ref_gradients,
+                                 std::vector<Eigen::Vector2d>& phys_gradients,
+                                 const std::vector<Eigen::Vector2d>& nodes) const;
 
     /**
      * @brief Assembles the element matrices for a single element.

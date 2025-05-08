@@ -1,4 +1,23 @@
+"""
+Configuration module for QDSim.
+
+This module provides a configuration class for quantum dot simulations,
+including physical constants, simulation parameters, material properties,
+and validation methods.
+
+Author: Dr. Mazharuddin Mohammed
+"""
+
 class Config:
+    """
+    Configuration class for quantum dot simulations.
+
+    This class stores all the parameters needed for quantum dot simulations,
+    including physical constants, simulation domain, mesh settings, material
+    properties, and solver parameters. It also provides methods for parameter
+    validation and unit conversion.
+    """
+
     def __init__(self):
         # Physical constants
         self.e_charge = 1.602e-19      # Electron charge (C)
@@ -51,6 +70,9 @@ class Config:
         # Temperature
         self.temperature = 300            # Temperature (K)
 
+        self.tolerance = 1e-6  # Self-consistency tolerance
+        self.max_iter = 500    # Max self-consistent iterations
+
     def validate(self):
         """Validate configuration parameters for physical consistency."""
         # Basic validation
@@ -74,6 +96,9 @@ class Config:
 
         # CAP validation
         assert self.eta >= 0, "CAP strength must be non-negative"
+
+        assert self.tolerance > 0, "Tolerance must be positive"
+        assert self.max_iter > 0, "Max iterations must be positive"
 
         return True
 

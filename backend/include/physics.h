@@ -106,8 +106,10 @@ double epsilon_r(double x, double y, const Materials::Material& p_mat,
  * @param depletion_width The depletion width in nanometers (nm)
  * @return The charge density at the given position in elementary charges per cubic nanometer (e/nm^3)
  */
-double charge_density(double x, double y, double N_A, double N_D, double depletion_width);
-
+// double charge_density(double x, double y, double N_A, double N_D, double depletion_width);
+double charge_density(double x, double y, const Eigen::VectorXd& n, const Eigen::VectorXd& p,
+                     const FEInterpolator* n_interpolator = nullptr,
+                     const FEInterpolator* p_interpolator = nullptr);
 /**
  * @brief Computes the capacitance at a given position.
  *
@@ -123,5 +125,10 @@ double charge_density(double x, double y, double N_A, double N_D, double depleti
  * @return The capacitance at the given position in farads per square nanometer (F/nm^2)
  */
 double cap(double x, double y, double eta, double Lx, double Ly, double d);
+
+double electron_concentration(double x, double y, double phi, const Materials::Material& mat);
+double hole_concentration(double x, double y, double phi, const Materials::Material& mat);
+double mobility_n(double x, double y, const Materials::Material& mat);
+double mobility_p(double x, double y, const Materials::Material& mat);
 
 } // namespace Physics

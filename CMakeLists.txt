@@ -1,11 +1,16 @@
 cmake_minimum_required(VERSION 3.10)
-project(QDSim)
+project(QDSim LANGUAGES CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CUDA_STANDARD 14)
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 # Option to enable/disable MPI at compile time
 option(USE_MPI "Enable MPI support" ON)
+
+# Option to enable/disable CUDA at compile time
+option(USE_CUDA "Enable CUDA support" ON)
 
 find_package(Eigen3 REQUIRED)
 find_package(pybind11 REQUIRED)
@@ -19,6 +24,24 @@ if(USE_MPI)
     add_definitions(-DUSE_MPI)
 endif()
 
+if(USE_CUDA)
+    find_package(CUDA REQUIRED)
+    include_directories(${CUDA_INCLUDE_DIRS})
+    add_definitions(-DUSE_CUDA)
+
+    # Find cuBLAS and cuSOLVER
+    find_library(CUBLAS_LIBRARY cublas HINTS ${CUDA_TOOLKIT_ROOT_DIR}/lib64)
+    find_library(CUSOLVER_LIBRARY cusolver HINTS ${CUDA_TOOLKIT_ROOT_DIR}/lib64)
+    find_library(CUSPARSE_LIBRARY cusparse HINTS ${CUDA_TOOLKIT_ROOT_DIR}/lib64)
+
+    if(NOT CUBLAS_LIBRARY OR NOT CUSOLVER_LIBRARY OR NOT CUSPARSE_LIBRARY)
+        message(FATAL_ERROR "cuBLAS, cuSOLVER, or cuSPARSE not found")
+    endif()
+
+    # Set CUDA flags
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_60")
+endif()
+
 set(SOURCES
     backend/src/mesh.cpp
     backend/src/fem.cpp
@@ -27,7 +50,20 @@ set(SOURCES
     backend/src/adaptive_mesh.cpp
     backend/src/normalization.cpp
     backend/src/poisson.cpp
+    backend/src/self_consistent.cpp
     backend/src/materials.cpp
+    backend/src/simple_mesh.cpp
+    backend/src/simple_interpolator.cpp
+    backend/src/pn_junction.cpp
+    backend/src/basic_solver.cpp
+    backend/src/improved_self_consistent.cpp
+    backend/src/fe_interpolator.cpp
+    backend/src/simple_self_consistent.cpp
+    backend/src/schrodinger.cpp
+    backend/src/gpu_accelerator.cpp
+    backend/src/gpu_kernels.cu
+    backend/src/gpu_eigensolver.cu
+    backend/src/full_poisson_dd_solver.cpp
     backend/src/bindings.cpp
 )
 
@@ -35,6 +71,73 @@ pybind11_add_module(qdsim_cpp ${SOURCES})
 target_link_libraries(qdsim_cpp PRIVATE pybind11::module)
 if(USE_MPI)
     target_link_libraries(qdsim_cpp PRIVATE ${MPI_CXX_LIBRARIES})
+endif()
+if(USE_CUDA)
+    target_link_libraries(qdsim_cpp PRIVATE ${CUDA_LIBRARIES} ${CUBLAS_LIBRARY} ${CUSOLVER_LIBRARY} ${CUSPARSE_LIBRARY})
+endif()
+
+# Create a static library for QDSim (excluding Python bindings)
+set(STATIC_SOURCES
+    backend/src/mesh.cpp
+    backend/src/fem.cpp
+    backend/src/physics.cpp
+    backend/src/solver.cpp
+    backend/src/adaptive_mesh.cpp
+    backend/src/normalization.cpp
+    backend/src/poisson.cpp
+    backend/src/self_consistent.cpp
+    backend/src/materials.cpp
+    backend/src/simple_mesh.cpp
+    backend/src/simple_interpolator.cpp
+    backend/src/pn_junction.cpp
+    backend/src/basic_solver.cpp
+    backend/src/improved_self_consistent.cpp
+    backend/src/fe_interpolator.cpp
+    backend/src/simple_self_consistent.cpp
+    backend/src/schrodinger.cpp
+    backend/src/gpu_accelerator.cpp
+    backend/src/gpu_kernels.cu
+    backend/src/gpu_eigensolver.cu
+    backend/src/gpu_cusolver.cu
+    backend/src/full_poisson_dd_solver.cpp
+)
+add_library(qdsim_static STATIC ${STATIC_SOURCES})
+target_link_libraries(qdsim_static PRIVATE ${EIGEN3_LIBRARIES})
+if(USE_MPI)
+    target_link_libraries(qdsim_static PRIVATE ${MPI_CXX_LIBRARIES})
+endif()
+if(USE_CUDA)
+    target_link_libraries(qdsim_static PRIVATE ${CUDA_LIBRARIES} ${CUBLAS_LIBRARY} ${CUSOLVER_LIBRARY} ${CUSPARSE_LIBRARY})
+endif()
+
+# Add the GPU acceleration test executable
+add_executable(gpu_acceleration_test examples/gpu_acceleration_cpp_test.cpp)
+target_link_libraries(gpu_acceleration_test PRIVATE qdsim_static ${EIGEN3_LIBRARIES})
+if(USE_MPI)
+    target_link_libraries(gpu_acceleration_test PRIVATE ${MPI_CXX_LIBRARIES})
+endif()
+if(USE_CUDA)
+    target_link_libraries(gpu_acceleration_test PRIVATE ${CUDA_LIBRARIES} ${CUBLAS_LIBRARY} ${CUSOLVER_LIBRARY} ${CUSPARSE_LIBRARY})
+endif()
+
+# Add the simple GPU test executable
+add_executable(simple_gpu_test examples/simple_gpu_test.cpp)
+target_link_libraries(simple_gpu_test PRIVATE qdsim_static ${EIGEN3_LIBRARIES})
+if(USE_MPI)
+    target_link_libraries(simple_gpu_test PRIVATE ${MPI_CXX_LIBRARIES})
+endif()
+if(USE_CUDA)
+    target_link_libraries(simple_gpu_test PRIVATE ${CUDA_LIBRARIES} ${CUBLAS_LIBRARY} ${CUSOLVER_LIBRARY} ${CUSPARSE_LIBRARY})
+endif()
+
+# Add the Poisson-Drift-Diffusion test executable
+add_executable(poisson_dd_test examples/poisson_dd_test.cpp)
+target_link_libraries(poisson_dd_test PRIVATE qdsim_static ${EIGEN3_LIBRARIES})
+if(USE_MPI)
+    target_link_libraries(poisson_dd_test PRIVATE ${MPI_CXX_LIBRARIES})
+endif()
+if(USE_CUDA)
+    target_link_libraries(poisson_dd_test PRIVATE ${CUDA_LIBRARIES} ${CUBLAS_LIBRARY} ${CUSOLVER_LIBRARY} ${CUSPARSE_LIBRARY})
 endif()
 
 # Make testing optional
@@ -51,6 +154,7 @@ if(BUILD_TESTING)
             backend/tests/test_adaptive_mesh.cpp
             backend/tests/test_normalization.cpp
             backend/tests/test_poisson.cpp
+            backend/tests/test_self_consistent.cpp
             backend/tests/test_materials.cpp
         )
 

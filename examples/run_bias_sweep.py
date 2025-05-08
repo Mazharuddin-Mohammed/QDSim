@@ -1,4 +1,14 @@
-# run_bias_sweep.py
+#!/usr/bin/env python3
+"""
+Example script for running a bias voltage sweep simulation.
+
+This script demonstrates how to perform a bias voltage sweep to study the
+Stark effect in quantum dots, showing how the energy levels and linewidths
+change with applied bias voltage.
+
+Author: Dr. Mazharuddin Mohammed
+"""
+
 from qdsim import Simulator, Config
 from qdsim.visualization import plot_energy_shift
 import matplotlib.pyplot as plt

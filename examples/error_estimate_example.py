@@ -1,3 +1,14 @@
+#!/usr/bin/env python3
+"""
+Example script for visualizing error estimators in quantum dot simulations.
+
+This script demonstrates how to compute and visualize the error estimator field
+for a quantum dot simulation, which is used to guide adaptive mesh refinement
+by identifying regions where the solution has high gradients or discontinuities.
+
+Author: Dr. Mazharuddin Mohammed
+"""
+
 from qdsim import Simulator, Config
 from qdsim.visualization import plot_error_estimator
 import matplotlib.pyplot as plt
