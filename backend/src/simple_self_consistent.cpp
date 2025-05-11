@@ -13,6 +13,45 @@
 #include <iostream>
 #include <cmath>
 
+/**
+ * @brief Default constructor for SimpleSelfConsistentSolver.
+ *
+ * @param mesh The mesh on which to solve the equations.
+ */
+SimpleSelfConsistentSolver::SimpleSelfConsistentSolver(Mesh& mesh)
+    : mesh(mesh), poisson(mesh,
+        // Default epsilon_r function
+        [](double x, double y) -> double { return 12.9; },
+        // Default rho function
+        [](double x, double y, const Eigen::VectorXd& n, const Eigen::VectorXd& p) -> double {
+            double q = 1.602e-19; // Elementary charge in C
+            if (n.size() == 0 || p.size() == 0) {
+                return 0.0;
+            }
+            // Simple charge density calculation
+            return q * (p[0] - n[0]);
+        }),
+      epsilon_r([](double x, double y) -> double { return 12.9; }), // Default value for GaAs
+      rho([](double x, double y, const Eigen::VectorXd& n, const Eigen::VectorXd& p) -> double {
+          double q = 1.602e-19; // Elementary charge in C
+          if (n.size() == 0 || p.size() == 0) {
+              return 0.0;
+          }
+          // Simple charge density calculation
+          return q * (p[0] - n[0]);
+      }) {
+    // Resize carrier concentration vectors
+    n.resize(mesh.getNumNodes());
+    p.resize(mesh.getNumNodes());
+}
+
+/**
+ * @brief Constructs a new SimpleSelfConsistentSolver object.
+ *
+ * @param mesh The mesh on which to solve the equations.
+ * @param epsilon_r Function that returns the relative permittivity at a point (x, y).
+ * @param rho Function that returns the charge density at a point (x, y) given the electron and hole concentrations.
+ */
 SimpleSelfConsistentSolver::SimpleSelfConsistentSolver(
     Mesh& mesh,
     std::function<double(double, double)> epsilon_r,

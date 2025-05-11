@@ -18,20 +18,38 @@
 #include <stdexcept>
 
 /**
- * @brief Constructs a new SelfConsistentSolver object.
+ * @brief Default constructor for SelfConsistentSolver.
  *
- * This constructor initializes the SelfConsistentSolver with the given mesh and callback functions
- * for computing physical quantities. It also initializes the PoissonSolver and resizes the carrier
- * concentration vectors and drift-diffusion matrices.
+ * This constructor initializes the SelfConsistentSolver with the given mesh.
+ * It sets up default values for the callback functions and initializes the
+ * PoissonSolver with default values.
  *
  * @param mesh The mesh to use for the simulation
- * @param epsilon_r Function that returns the relative permittivity at a given position
- * @param rho Function that returns the charge density at a given position
- * @param n_conc Function that returns the electron concentration at a given position
- * @param p_conc Function that returns the hole concentration at a given position
- * @param mu_n Function that returns the electron mobility at a given position
- * @param mu_p Function that returns the hole mobility at a given position
  */
+SelfConsistentSolver::SelfConsistentSolver(Mesh& mesh)
+    : mesh(mesh), poisson(mesh,
+        // Default epsilon_r function
+        [](double x, double y) -> double { return 12.9; },
+        // Default rho function
+        [](double x, double y, const Eigen::VectorXd& n, const Eigen::VectorXd& p) -> double { return 0.0; }),
+      epsilon_r(nullptr), rho(nullptr), n_conc(nullptr), p_conc(nullptr), mu_n(nullptr), mu_p(nullptr),
+      damping_factor(0.3), anderson_history_size(3), has_heterojunction(false), N_A(0.0), N_D(0.0) {
+
+    // Resize carrier concentration vectors and drift-diffusion matrices
+    n.resize(mesh.getNumNodes());
+    p.resize(mesh.getNumNodes());
+    Kn.resize(mesh.getNumNodes(), mesh.getNumNodes());
+    Kp.resize(mesh.getNumNodes(), mesh.getNumNodes());
+
+    // Initialize with zeros
+    n.setZero();
+    p.setZero();
+
+    // Initialize convergence acceleration parameters
+    phi_history.clear();
+    res_history.clear();
+}
+
 /**
  * @brief Constructs a new SelfConsistentSolver object.
  *
