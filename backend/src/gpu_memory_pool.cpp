@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <chrono>
 #include <iomanip>
+#include <map>
 
 #ifdef USE_CUDA
 
