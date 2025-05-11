@@ -237,10 +237,7 @@ public:
      */
     static void refineMultiLevel(
         Mesh& mesh,
-        ErrorEstimator& error_estimator,
         const Eigen::VectorXd& solution,
-        const Eigen::SparseMatrix<std::complex<double>>& H,
-        const Eigen::SparseMatrix<std::complex<double>>& M,
         std::function<double(double, double)> m_star,
         std::function<double(double, double)> V,
         int max_levels,
