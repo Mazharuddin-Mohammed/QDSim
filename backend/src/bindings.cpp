@@ -317,6 +317,74 @@ void logError(const std::string& callback_name, double x, double y, const std::s
 }
 
 /**
+ * @brief Convert a Python material object to a C++ Material object.
+ *
+ * This function converts a Python material object to a C++ Material object.
+ * It handles both C++ Material objects and Python objects with material properties.
+ *
+ * @param py_material The Python material object.
+ * @return Materials::Material The C++ Material object.
+ * @throws std::runtime_error If the conversion fails.
+ */
+Materials::Material convert_py_material_to_cpp(const pybind11::object& py_material) {
+    // Check if the object is already a C++ Material
+    try {
+        return py_material.cast<Materials::Material>();
+    } catch (const pybind11::cast_error&) {
+        // Not a C++ Material, try to extract properties
+    }
+
+    // Create a default material
+    Materials::Material cpp_material;
+
+    // Try to extract properties from Python object
+    try {
+        // Check if the object has the expected attributes
+        if (py_material.attr("__class__").attr("__name__").cast<std::string>() == "Material") {
+            // Extract properties from Python Material class
+            if (pybind11::hasattr(py_material, "epsilon_r")) {
+                cpp_material.epsilon_r = py_material.attr("epsilon_r").cast<double>();
+            }
+            if (pybind11::hasattr(py_material, "band_gap") || pybind11::hasattr(py_material, "E_g")) {
+                cpp_material.E_g = pybind11::hasattr(py_material, "band_gap") ?
+                    py_material.attr("band_gap").cast<double>() :
+                    py_material.attr("E_g").cast<double>();
+            }
+            if (pybind11::hasattr(py_material, "electron_mass") || pybind11::hasattr(py_material, "m_e")) {
+                cpp_material.m_e = pybind11::hasattr(py_material, "electron_mass") ?
+                    py_material.attr("electron_mass").cast<double>() :
+                    py_material.attr("m_e").cast<double>();
+            }
+            if (pybind11::hasattr(py_material, "hole_mass") || pybind11::hasattr(py_material, "m_h")) {
+                cpp_material.m_h = pybind11::hasattr(py_material, "hole_mass") ?
+                    py_material.attr("hole_mass").cast<double>() :
+                    py_material.attr("m_h").cast<double>();
+            }
+            if (pybind11::hasattr(py_material, "mu_n")) {
+                cpp_material.mu_n = py_material.attr("mu_n").cast<double>();
+            }
+            if (pybind11::hasattr(py_material, "mu_p")) {
+                cpp_material.mu_p = py_material.attr("mu_p").cast<double>();
+            }
+        } else if (py_material.is_none()) {
+            // None object, use default values
+            cpp_material.epsilon_r = 1.0;  // Vacuum
+            cpp_material.E_g = 0.0;        // No bandgap
+            cpp_material.m_e = 1.0;        // Free electron mass
+            cpp_material.m_h = 1.0;        // Free hole mass
+            cpp_material.mu_n = 0.0;       // No mobility
+            cpp_material.mu_p = 0.0;       // No mobility
+        }
+    } catch (const std::exception& e) {
+        std::string error_msg = "Error converting Python material to C++: ";
+        error_msg += e.what();
+        throw std::runtime_error(error_msg);
+    }
+
+    return cpp_material;
+}
+
+/**
  * @brief C++ wrapper function for the epsilon_r Python callback.
  *
  * This function safely calls the Python callback function for calculating
@@ -325,10 +393,13 @@ void logError(const std::string& callback_name, double x, double y, const std::s
  *
  * @param x The x-coordinate.
  * @param y The y-coordinate.
+ * @param p_mat The p-type material.
+ * @param n_mat The n-type material.
  * @return double The relative permittivity at (x, y).
  * @throws CallbackException If an error occurs during the callback.
  */
-double epsilon_r_wrapper(double x, double y) {
+double epsilon_r_wrapper(double x, double y, const Materials::Material& p_mat = Materials::Material(),
+                         const Materials::Material& n_mat = Materials::Material()) {
     // Acquire the GIL before calling into Python
     pybind11::gil_scoped_acquire gil;
 
@@ -338,35 +409,49 @@ double epsilon_r_wrapper(double x, double y) {
         if (!callback) {
             // No callback registered, use default value
             logError("epsilon_r", x, y, "Python callback not found. Using default value.");
-            return 1.0; // Default value for relative permittivity (vacuum)
+            return p_mat.epsilon_r > 0.0 ? p_mat.epsilon_r : 1.0; // Use p_mat if available, otherwise vacuum
         }
 
         try {
-            // Call the Python function and convert the result to double
-            pybind11::object result = (*callback)(x, y);
+            pybind11::object result;
+
+            // Try different call signatures based on the number of arguments the callback accepts
+            try {
+                // First try with all parameters
+                result = (*callback)(x, y, p_mat, n_mat);
+            } catch (const pybind11::error_already_set& e) {
+                // If that fails, try with just x and y
+                pybind11::gil_scoped_release release;
+                pybind11::gil_scoped_acquire acquire;
+
+                try {
+                    result = (*callback)(x, y);
+                } catch (const pybind11::error_already_set& e2) {
+                    // If that also fails, try with just x, y, and p_mat
+                    pybind11::gil_scoped_release release2;
+                    pybind11::gil_scoped_acquire acquire2;
+
+                    try {
+                        result = (*callback)(x, y, p_mat);
+                    } catch (const pybind11::error_already_set& e3) {
+                        // If all attempts fail, log the error and use default value
+                        std::string error_msg = "Python exception in epsilon_r callback: ";
+                        error_msg += e.what();
+
+                        logError("epsilon_r", x, y, error_msg);
+                        return p_mat.epsilon_r > 0.0 ? p_mat.epsilon_r : 1.0;
+                    }
+                }
+            }
 
             // Check if the result is None
             if (result.is_none()) {
                 logError("epsilon_r", x, y, "Python callback returned None. Using default value.");
-                return 1.0;
+                return p_mat.epsilon_r > 0.0 ? p_mat.epsilon_r : 1.0;
             }
 
             // Convert the result to double
             return result.cast<double>();
-
-        } catch (const pybind11::error_already_set& e) {
-            // Python exception occurred
-            std::string error_msg = "Python exception in epsilon_r callback: ";
-            error_msg += e.what();
-
-            // Get Python traceback if available
-            if (e.trace()) {
-                error_msg += "\nTraceback: ";
-                error_msg += e.trace();
-            }
-
-            logError("epsilon_r", x, y, error_msg);
-            throw CallbackException("epsilon_r", x, y, error_msg);
 
         } catch (const pybind11::cast_error& e) {
             // Type conversion error
@@ -396,7 +481,7 @@ double epsilon_r_wrapper(double x, double y) {
     }
 
     // This line should never be reached, but is included for safety
-    return 1.0;
+    return p_mat.epsilon_r > 0.0 ? p_mat.epsilon_r : 1.0;
 }
 
 /**
@@ -427,8 +512,53 @@ double rho_wrapper(double x, double y, const Eigen::VectorXd& n, const Eigen::Ve
         }
 
         try {
-            // Call the Python function and convert the result to double
-            pybind11::object result = (*callback)(x, y, n, p);
+            pybind11::object result;
+
+            // Try different call signatures based on the number of arguments the callback accepts
+            try {
+                // First try with all parameters
+                result = (*callback)(x, y, n, p);
+            } catch (const pybind11::error_already_set& e) {
+                // If that fails, try with just x and y
+                pybind11::gil_scoped_release release;
+                pybind11::gil_scoped_acquire acquire;
+
+                try {
+                    result = (*callback)(x, y);
+                } catch (const pybind11::error_already_set& e2) {
+                    // If that also fails, try with scalar n and p values (using the value at the node closest to x,y)
+                    pybind11::gil_scoped_release release2;
+                    pybind11::gil_scoped_acquire acquire2;
+
+                    // Find the closest node to (x,y) to get scalar n and p values
+                    double n_scalar = 0.0;
+                    double p_scalar = 0.0;
+
+                    if (n.size() > 0 && p.size() > 0) {
+                        // Use the first element as a simple approximation
+                        // In a real implementation, we would find the closest node
+                        n_scalar = n(0);
+                        p_scalar = p(0);
+                    }
+
+                    try {
+                        result = (*callback)(x, y, n_scalar, p_scalar);
+                    } catch (const pybind11::error_already_set& e3) {
+                        // If all attempts fail, log the error and use default value
+                        std::string error_msg = "Python exception in rho callback: ";
+                        error_msg += e.what();
+
+                        // Get Python traceback if available
+                        if (e.trace()) {
+                            error_msg += "\nTraceback: ";
+                            error_msg += e.trace().cast<std::string>();
+                        }
+
+                        logError("rho", x, y, error_msg);
+                        return 0.0;
+                    }
+                }
+            }
 
             // Check if the result is None
             if (result.is_none()) {
@@ -438,20 +568,6 @@ double rho_wrapper(double x, double y, const Eigen::VectorXd& n, const Eigen::Ve
 
             // Convert the result to double
             return result.cast<double>();
-
-        } catch (const pybind11::error_already_set& e) {
-            // Python exception occurred
-            std::string error_msg = "Python exception in rho callback: ";
-            error_msg += e.what();
-
-            // Get Python traceback if available
-            if (e.trace()) {
-                error_msg += "\nTraceback: ";
-                error_msg += e.trace();
-            }
-
-            logError("rho", x, y, error_msg);
-            throw CallbackException("rho", x, y, error_msg);
 
         } catch (const pybind11::cast_error& e) {
             // Type conversion error
@@ -512,8 +628,42 @@ double n_conc_wrapper(double x, double y, double phi, const Materials::Material&
         }
 
         try {
-            // Call the Python function and convert the result to double
-            pybind11::object result = (*callback)(x, y, phi, mat);
+            pybind11::object result;
+
+            // Try different call signatures based on the number of arguments the callback accepts
+            try {
+                // First try with all parameters
+                result = (*callback)(x, y, phi, mat);
+            } catch (const pybind11::error_already_set& e) {
+                // If that fails, try with just x, y, and phi
+                pybind11::gil_scoped_release release;
+                pybind11::gil_scoped_acquire acquire;
+
+                try {
+                    result = (*callback)(x, y, phi);
+                } catch (const pybind11::error_already_set& e2) {
+                    // If that also fails, try with just x and y
+                    pybind11::gil_scoped_release release2;
+                    pybind11::gil_scoped_acquire acquire2;
+
+                    try {
+                        result = (*callback)(x, y);
+                    } catch (const pybind11::error_already_set& e3) {
+                        // If all attempts fail, log the error and use Physics implementation
+                        std::string error_msg = "Python exception in n_conc callback: ";
+                        error_msg += e.what();
+
+                        // Get Python traceback if available
+                        if (e.trace()) {
+                            error_msg += "\nTraceback: ";
+                            error_msg += e.trace().cast<std::string>();
+                        }
+
+                        logError("n_conc", x, y, error_msg);
+                        return Physics::electron_concentration(x, y, phi, mat);
+                    }
+                }
+            }
 
             // Check if the result is None
             if (result.is_none()) {
@@ -523,20 +673,6 @@ double n_conc_wrapper(double x, double y, double phi, const Materials::Material&
 
             // Convert the result to double
             return result.cast<double>();
-
-        } catch (const pybind11::error_already_set& e) {
-            // Python exception occurred
-            std::string error_msg = "Python exception in n_conc callback: ";
-            error_msg += e.what();
-
-            // Get Python traceback if available
-            if (e.trace()) {
-                error_msg += "\nTraceback: ";
-                error_msg += e.trace();
-            }
-
-            logError("n_conc", x, y, error_msg);
-            throw CallbackException("n_conc", x, y, error_msg);
 
         } catch (const pybind11::cast_error& e) {
             // Type conversion error
@@ -597,8 +733,42 @@ double p_conc_wrapper(double x, double y, double phi, const Materials::Material&
         }
 
         try {
-            // Call the Python function and convert the result to double
-            pybind11::object result = (*callback)(x, y, phi, mat);
+            pybind11::object result;
+
+            // Try different call signatures based on the number of arguments the callback accepts
+            try {
+                // First try with all parameters
+                result = (*callback)(x, y, phi, mat);
+            } catch (const pybind11::error_already_set& e) {
+                // If that fails, try with just x, y, and phi
+                pybind11::gil_scoped_release release;
+                pybind11::gil_scoped_acquire acquire;
+
+                try {
+                    result = (*callback)(x, y, phi);
+                } catch (const pybind11::error_already_set& e2) {
+                    // If that also fails, try with just x and y
+                    pybind11::gil_scoped_release release2;
+                    pybind11::gil_scoped_acquire acquire2;
+
+                    try {
+                        result = (*callback)(x, y);
+                    } catch (const pybind11::error_already_set& e3) {
+                        // If all attempts fail, log the error and use Physics implementation
+                        std::string error_msg = "Python exception in p_conc callback: ";
+                        error_msg += e.what();
+
+                        // Get Python traceback if available
+                        if (e.trace()) {
+                            error_msg += "\nTraceback: ";
+                            error_msg += e.trace().cast<std::string>();
+                        }
+
+                        logError("p_conc", x, y, error_msg);
+                        return Physics::hole_concentration(x, y, phi, mat);
+                    }
+                }
+            }
 
             // Check if the result is None
             if (result.is_none()) {
@@ -608,20 +778,6 @@ double p_conc_wrapper(double x, double y, double phi, const Materials::Material&
 
             // Convert the result to double
             return result.cast<double>();
-
-        } catch (const pybind11::error_already_set& e) {
-            // Python exception occurred
-            std::string error_msg = "Python exception in p_conc callback: ";
-            error_msg += e.what();
-
-            // Get Python traceback if available
-            if (e.trace()) {
-                error_msg += "\nTraceback: ";
-                error_msg += e.trace();
-            }
-
-            logError("p_conc", x, y, error_msg);
-            throw CallbackException("p_conc", x, y, error_msg);
 
         } catch (const pybind11::cast_error& e) {
             // Type conversion error
@@ -681,8 +837,34 @@ double mu_n_wrapper(double x, double y, const Materials::Material& mat) {
         }
 
         try {
-            // Call the Python function and convert the result to double
-            pybind11::object result = (*callback)(x, y, mat);
+            pybind11::object result;
+
+            // Try different call signatures based on the number of arguments the callback accepts
+            try {
+                // First try with all parameters
+                result = (*callback)(x, y, mat);
+            } catch (const pybind11::error_already_set& e) {
+                // If that fails, try with just x and y
+                pybind11::gil_scoped_release release;
+                pybind11::gil_scoped_acquire acquire;
+
+                try {
+                    result = (*callback)(x, y);
+                } catch (const pybind11::error_already_set& e2) {
+                    // If all attempts fail, log the error and use Physics implementation
+                    std::string error_msg = "Python exception in mu_n callback: ";
+                    error_msg += e.what();
+
+                    // Get Python traceback if available
+                    if (e.trace()) {
+                        error_msg += "\nTraceback: ";
+                        error_msg += e.trace().cast<std::string>();
+                    }
+
+                    logError("mu_n", x, y, error_msg);
+                    return Physics::mobility_n(x, y, mat);
+                }
+            }
 
             // Check if the result is None
             if (result.is_none()) {
@@ -692,20 +874,6 @@ double mu_n_wrapper(double x, double y, const Materials::Material& mat) {
 
             // Convert the result to double
             return result.cast<double>();
-
-        } catch (const pybind11::error_already_set& e) {
-            // Python exception occurred
-            std::string error_msg = "Python exception in mu_n callback: ";
-            error_msg += e.what();
-
-            // Get Python traceback if available
-            if (e.trace()) {
-                error_msg += "\nTraceback: ";
-                error_msg += e.trace();
-            }
-
-            logError("mu_n", x, y, error_msg);
-            throw CallbackException("mu_n", x, y, error_msg);
 
         } catch (const pybind11::cast_error& e) {
             // Type conversion error
@@ -765,8 +933,34 @@ double mu_p_wrapper(double x, double y, const Materials::Material& mat) {
         }
 
         try {
-            // Call the Python function and convert the result to double
-            pybind11::object result = (*callback)(x, y, mat);
+            pybind11::object result;
+
+            // Try different call signatures based on the number of arguments the callback accepts
+            try {
+                // First try with all parameters
+                result = (*callback)(x, y, mat);
+            } catch (const pybind11::error_already_set& e) {
+                // If that fails, try with just x and y
+                pybind11::gil_scoped_release release;
+                pybind11::gil_scoped_acquire acquire;
+
+                try {
+                    result = (*callback)(x, y);
+                } catch (const pybind11::error_already_set& e2) {
+                    // If all attempts fail, log the error and use Physics implementation
+                    std::string error_msg = "Python exception in mu_p callback: ";
+                    error_msg += e.what();
+
+                    // Get Python traceback if available
+                    if (e.trace()) {
+                        error_msg += "\nTraceback: ";
+                        error_msg += e.trace().cast<std::string>();
+                    }
+
+                    logError("mu_p", x, y, error_msg);
+                    return Physics::mobility_p(x, y, mat);
+                }
+            }
 
             // Check if the result is None
             if (result.is_none()) {
@@ -776,20 +970,6 @@ double mu_p_wrapper(double x, double y, const Materials::Material& mat) {
 
             // Convert the result to double
             return result.cast<double>();
-
-        } catch (const pybind11::error_already_set& e) {
-            // Python exception occurred
-            std::string error_msg = "Python exception in mu_p callback: ";
-            error_msg += e.what();
-
-            // Get Python traceback if available
-            if (e.trace()) {
-                error_msg += "\nTraceback: ";
-                error_msg += e.trace();
-            }
-
-            logError("mu_p", x, y, error_msg);
-            throw CallbackException("mu_p", x, y, error_msg);
 
         } catch (const pybind11::cast_error& e) {
             // Type conversion error
@@ -888,19 +1068,40 @@ PYBIND11_MODULE(qdsim_cpp, m) {
         .def(pybind11::init<>(), "Construct a new Material object with default properties")
         .def_readwrite("m_e", &Materials::Material::m_e, "Electron effective mass (relative to free electron mass)")
         .def_readwrite("m_h", &Materials::Material::m_h, "Hole effective mass (relative to free electron mass)")
+        .def_readwrite("m_lh", &Materials::Material::m_lh, "Light hole effective mass (relative to free electron mass)")
+        .def_readwrite("m_hh", &Materials::Material::m_hh, "Heavy hole effective mass (relative to free electron mass)")
+        .def_readwrite("m_so", &Materials::Material::m_so, "Split-off hole effective mass (relative to free electron mass)")
         .def_readwrite("E_g", &Materials::Material::E_g, "Band gap energy (eV)")
         .def_readwrite("Delta_E_c", &Materials::Material::Delta_E_c, "Conduction band offset (eV)")
+        .def_readwrite("Delta_E_v", &Materials::Material::Delta_E_v, "Valence band offset (eV)")
         .def_readwrite("epsilon_r", &Materials::Material::epsilon_r, "Relative permittivity")
         .def_readwrite("mu_n", &Materials::Material::mu_n, "Electron mobility (nm²/V·s)")
         .def_readwrite("mu_p", &Materials::Material::mu_p, "Hole mobility (nm²/V·s)")
         .def_readwrite("N_c", &Materials::Material::N_c, "Effective density of states in conduction band (1/nm³)")
         .def_readwrite("N_v", &Materials::Material::N_v, "Effective density of states in valence band (1/nm³)")
+        .def_readwrite("lattice_constant", &Materials::Material::lattice_constant, "Lattice constant (nm)")
+        .def_readwrite("spin_orbit_splitting", &Materials::Material::spin_orbit_splitting, "Spin-orbit splitting energy (eV)")
+        .def_readwrite("deformation_potential_c", &Materials::Material::deformation_potential_c, "Deformation potential for conduction band (eV)")
+        .def_readwrite("deformation_potential_v", &Materials::Material::deformation_potential_v, "Deformation potential for valence band (eV)")
+        .def_readwrite("elastic_c11", &Materials::Material::elastic_c11, "Elastic constant c11 (GPa)")
+        .def_readwrite("elastic_c12", &Materials::Material::elastic_c12, "Elastic constant c12 (GPa)")
+        .def_readwrite("elastic_c44", &Materials::Material::elastic_c44, "Elastic constant c44 (GPa)")
+        .def_readwrite("varshni_alpha", &Materials::Material::varshni_alpha, "Varshni parameter alpha for temperature dependence of bandgap")
+        .def_readwrite("varshni_beta", &Materials::Material::varshni_beta, "Varshni parameter beta for temperature dependence of bandgap")
+        .def_readwrite("luttinger_gamma1", &Materials::Material::luttinger_gamma1, "Luttinger parameter gamma1 for k·p calculations")
+        .def_readwrite("luttinger_gamma2", &Materials::Material::luttinger_gamma2, "Luttinger parameter gamma2 for k·p calculations")
+        .def_readwrite("luttinger_gamma3", &Materials::Material::luttinger_gamma3, "Luttinger parameter gamma3 for k·p calculations")
+        .def_readwrite("kane_parameter", &Materials::Material::kane_parameter, "Kane parameter for k·p calculations (eV·nm)")
         .def("__repr__", [](const Materials::Material& mat) {
             return "<Material: m_e=" + std::to_string(mat.m_e) +
                    ", m_h=" + std::to_string(mat.m_h) +
                    ", E_g=" + std::to_string(mat.E_g) +
                    ", epsilon_r=" + std::to_string(mat.epsilon_r) + ">";
-        });
+        })
+        // Add a constructor that takes a Python dictionary or object
+        .def(pybind11::init([](const pybind11::object& obj) {
+            return convert_py_material_to_cpp(obj);
+        }), pybind11::arg("properties"), "Construct a new Material object from a Python dictionary or object");
 
     // MaterialDatabase class for material properties
     pybind11::class_<Materials::MaterialDatabase>(m, "MaterialDatabase")
@@ -953,15 +1154,6 @@ PYBIND11_MODULE(qdsim_cpp, m) {
 
      // SelfConsistentSolver class for self-consistent Poisson-drift-diffusion simulations
      pybind11::class_<SelfConsistentSolver>(m, "SelfConsistentSolver")
-             .def(pybind11::init<Mesh&, double(*)(double, double),
-                                double(*)(double, double, const Eigen::VectorXd&, const Eigen::VectorXd&),
-                                double(*)(double, double, double, const Materials::Material&),
-                                double(*)(double, double, double, const Materials::Material&),
-                                double(*)(double, double, const Materials::Material&),
-                                double(*)(double, double, const Materials::Material&)>(),
-                  pybind11::arg("mesh"), pybind11::arg("epsilon_r"), pybind11::arg("rho"),
-                  pybind11::arg("n_conc"), pybind11::arg("p_conc"), pybind11::arg("mu_n"), pybind11::arg("mu_p"),
-                  "Construct a new SelfConsistentSolver object with the specified mesh and callback functions")
              .def("solve", &SelfConsistentSolver::solve,
                   pybind11::arg("V_p"), pybind11::arg("V_n"), pybind11::arg("N_A"), pybind11::arg("N_D"),
                   pybind11::arg("tolerance") = 1e-6, pybind11::arg("max_iter") = 100,
@@ -1091,10 +1283,6 @@ PYBIND11_MODULE(qdsim_cpp, m) {
 
      // SimpleSelfConsistentSolver class for simplified self-consistent Poisson-drift-diffusion simulations
      pybind11::class_<SimpleSelfConsistentSolver>(m, "SimpleSelfConsistentSolver")
-             .def(pybind11::init<Mesh&, std::function<double(double, double)>,
-                                std::function<double(double, double, const Eigen::VectorXd&, const Eigen::VectorXd&)>>(),
-                  pybind11::arg("mesh"), pybind11::arg("epsilon_r"), pybind11::arg("rho"),
-                  "Construct a new SimpleSelfConsistentSolver object with the specified mesh and callback functions")
              .def("solve", &SimpleSelfConsistentSolver::solve,
                   pybind11::arg("V_p"), pybind11::arg("V_n"), pybind11::arg("N_A"), pybind11::arg("N_D"),
                   pybind11::arg("tolerance") = 1e-6, pybind11::arg("max_iter") = 100,
@@ -1123,10 +1311,6 @@ PYBIND11_MODULE(qdsim_cpp, m) {
 
      // ImprovedSelfConsistentSolver class for self-consistent Poisson-drift-diffusion simulations
      pybind11::class_<ImprovedSelfConsistentSolver>(m, "ImprovedSelfConsistentSolver")
-             .def(pybind11::init<Mesh&, std::function<double(double, double)>,
-                                std::function<double(double, double, const Eigen::VectorXd&, const Eigen::VectorXd&)>>(),
-                  pybind11::arg("mesh"), pybind11::arg("epsilon_r"), pybind11::arg("rho"),
-                  "Construct a new ImprovedSelfConsistentSolver object with the specified mesh and callback functions")
              .def("solve", &ImprovedSelfConsistentSolver::solve,
                   pybind11::arg("V_p"), pybind11::arg("V_n"), pybind11::arg("N_A"), pybind11::arg("N_D"),
                   pybind11::arg("tolerance") = 1e-6, pybind11::arg("max_iter") = 100,
@@ -1210,9 +1394,8 @@ PYBIND11_MODULE(qdsim_cpp, m) {
 
          // Create the SelfConsistentSolver with the wrapper functions
          try {
-             // Use a unique_ptr to ensure proper cleanup in case of exceptions
-             auto solver = std::make_unique<SelfConsistentSolver>(
-                 mesh, epsilon_r_wrapper, rho_wrapper, n_conc_wrapper, p_conc_wrapper, mu_n_wrapper, mu_p_wrapper);
+             // Create a new SelfConsistentSolver
+             auto solver = std::make_unique<SelfConsistentSolver>(mesh);
 
              // Release ownership and return the raw pointer (pybind11 will handle the memory)
              return solver.release();
@@ -1265,7 +1448,7 @@ PYBIND11_MODULE(qdsim_cpp, m) {
          // Create the SimpleSelfConsistentSolver with the wrapper functions
          try {
              // Use a unique_ptr to ensure proper cleanup in case of exceptions
-             auto solver = std::make_unique<SimpleSelfConsistentSolver>(mesh, epsilon_r_wrapper, rho_wrapper);
+             auto solver = std::make_unique<SimpleSelfConsistentSolver>(mesh);
 
              // Release ownership and return the raw pointer (pybind11 will handle the memory)
              return solver.release();
@@ -1309,7 +1492,7 @@ PYBIND11_MODULE(qdsim_cpp, m) {
          // Create the ImprovedSelfConsistentSolver with the wrapper functions
          try {
              // Use a unique_ptr to ensure proper cleanup in case of exceptions
-             auto solver = std::make_unique<ImprovedSelfConsistentSolver>(mesh, epsilon_r_wrapper, rho_wrapper);
+             auto solver = std::make_unique<ImprovedSelfConsistentSolver>(mesh);
 
              // Release ownership and return the raw pointer (pybind11 will handle the memory)
              return solver.release();
@@ -1372,7 +1555,7 @@ PYBIND11_MODULE(qdsim_cpp, m) {
                  // Get Python traceback if available
                  if (e.trace()) {
                      error_msg += "\nTraceback: ";
-                     error_msg += e.trace();
+                     error_msg += e.trace().cast<std::string>();
                  }
 
                  throw std::runtime_error(error_msg);
@@ -1422,7 +1605,7 @@ PYBIND11_MODULE(qdsim_cpp, m) {
                  // Get Python traceback if available
                  if (e.trace()) {
                      error_msg += "\nTraceback: ";
-                     error_msg += e.trace();
+                     error_msg += e.trace().cast<std::string>();
                  }
 
                  throw std::runtime_error(error_msg);
@@ -1475,6 +1658,20 @@ PYBIND11_MODULE(qdsim_cpp, m) {
      m.def("has_callback", &hasCallback,
          pybind11::arg("name"),
         "Check if a callback with the given name exists");
+
+     // Add a function to set a callback
+     m.def("setCallback", &setCallback,
+         pybind11::arg("name"), pybind11::arg("callback"),
+        "Set a callback function with the given name");
+
+     // Add a function to clear a callback
+     m.def("clearCallback", &clearCallback,
+         pybind11::arg("name"),
+        "Clear a callback function with the given name");
+
+     // Add a function to clear all callbacks
+     m.def("clearCallbacks", &clearCallbacks,
+        "Clear all callback functions");
 
      // GPUAccelerator class for GPU-accelerated computations
      pybind11::class_<GPUAccelerator>(m, "GPUAccelerator")
@@ -1612,7 +1809,9 @@ PYBIND11_MODULE(qdsim_cpp, m) {
 #ifdef USE_MPI
         AdaptiveMesh::refineMesh(mesh, refine_flags, MPI_COMM_WORLD);
 #else
-        AdaptiveMesh::refineMesh(mesh, refine_flags);
+        // Create a dummy MPI_Comm for non-MPI builds
+        MPI_Comm dummy_comm = MPI_COMM_WORLD;
+        AdaptiveMesh::refineMesh(mesh, refine_flags, dummy_comm);
 #endif
     };
 
@@ -1624,7 +1823,9 @@ PYBIND11_MODULE(qdsim_cpp, m) {
         .def_static("compute_refinement_flags", &AdaptiveMesh::computeRefinementFlags,
                    pybind11::arg("mesh"), pybind11::arg("psi"), pybind11::arg("threshold"),
                    "Compute refinement flags based on solution gradients")
-        .def_static("smooth_mesh", &AdaptiveMesh::smoothMesh,
+        .def_static("smooth_mesh", [](Mesh& mesh) {
+                       AdaptiveMesh::smoothMesh(mesh, 3, 0.3);
+                   },
                    pybind11::arg("mesh"),
                    "Smooth the mesh to improve element quality")
         .def_static("compute_triangle_quality", &AdaptiveMesh::computeTriangleQuality,

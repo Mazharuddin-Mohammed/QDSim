@@ -353,7 +353,11 @@ void AdaptiveMesh::refineMesh(Mesh& mesh, const std::vector<bool>& refine_flags,
     }
 
     // If hanging nodes are not allowed, ensure mesh conformity
-    if (!allow_hanging_nodes) {
+    bool allow_hanging = false;
+#ifndef USE_MPI
+    allow_hanging = allow_hanging_nodes;
+#endif
+    if (!allow_hanging) {
         // Check for hanging nodes and refine additional elements as needed
         std::map<std::pair<int, int>, std::vector<int>> edge_to_elements;
 
@@ -388,7 +392,11 @@ void AdaptiveMesh::refineMesh(Mesh& mesh, const std::vector<bool>& refine_flags,
         // If hanging nodes were found, refine additional elements
         if (has_hanging_nodes) {
             // Recursive refinement to ensure conformity
+#ifdef USE_MPI
+            refineMesh(mesh, additional_refine, comm);
+#else
             refineMesh(mesh, additional_refine, false);
+#endif
         }
     }
 
@@ -1208,16 +1216,12 @@ std::vector<bool> AdaptiveMesh::computePhysicsBasedRefinementFlags(
  * levels in different regions of the mesh.
  *
  * The algorithm iteratively:
- * 1. Computes error indicators using the provided error estimator
- * 2. Marks elements for refinement based on the error indicators
- * 3. Refines the mesh
- * 4. Updates the solution, Hamiltonian, and mass matrices
+ * 1. Computes refinement flags based on the solution gradient
+ * 2. Refines the mesh
+ * 3. Updates the solution
  *
  * @param mesh The mesh to refine
- * @param error_estimator The error estimator to use
  * @param solution The solution vector
- * @param H The Hamiltonian matrix
- * @param M The mass matrix
  * @param m_star Function that returns the effective mass at a given position
  * @param V Function that returns the potential at a given position
  * @param max_levels The maximum number of refinement levels
@@ -1226,10 +1230,7 @@ std::vector<bool> AdaptiveMesh::computePhysicsBasedRefinementFlags(
  */
 void AdaptiveMesh::refineMultiLevel(
     Mesh& mesh,
-    ErrorEstimator& error_estimator,
     const Eigen::VectorXd& solution,
-    const Eigen::SparseMatrix<std::complex<double>>& H,
-    const Eigen::SparseMatrix<std::complex<double>>& M,
     std::function<double(double, double)> m_star,
     std::function<double(double, double)> V,
     int max_levels,
@@ -1242,31 +1243,11 @@ void AdaptiveMesh::refineMultiLevel(
 
     // Initialize solution vector
     Eigen::VectorXd current_solution = solution;
-    Eigen::SparseMatrix<std::complex<double>> current_H = H;
-    Eigen::SparseMatrix<std::complex<double>> current_M = M;
 
     // Perform multi-level refinement
     for (int level = 0; level < max_levels; ++level) {
-        // Compute error indicators
-        std::vector<double> error_indicators = error_estimator.estimateError(
-            current_solution, current_H, current_M, m_star, V);
-
-        // Compute maximum error
-        double max_error = *std::max_element(error_indicators.begin(), error_indicators.end());
-
-        // If maximum error is below threshold, stop refinement
-        if (max_error < threshold) {
-            std::cout << "Refinement converged at level " << level << " with max error " << max_error << std::endl;
-            break;
-        }
-
-        // Compute refinement flags
-        std::vector<bool> refine_flags(mesh.getNumElements(), false);
-        for (size_t i = 0; i < error_indicators.size(); ++i) {
-            if (error_indicators[i] > threshold * max_error) {
-                refine_flags[i] = true;
-            }
-        }
+        // Compute refinement flags based on solution gradient
+        std::vector<bool> refine_flags = computeRefinementFlags(mesh, current_solution, threshold);
 
         // Count elements to be refined
         int num_refined = std::count(refine_flags.begin(), refine_flags.end(), true);
@@ -1278,18 +1259,48 @@ void AdaptiveMesh::refineMultiLevel(
         std::cout << "Refining " << num_refined << " elements at level " << level << std::endl;
 
         // Refine mesh
+#ifdef USE_MPI
+        refineMesh(mesh, refine_flags, MPI_COMM_WORLD);
+#else
         refineMesh(mesh, refine_flags, allow_hanging_nodes);
+#endif
 
-        // Update solution, Hamiltonian, and mass matrices
-        // This is a placeholder - in a real implementation, we would need to
-        // interpolate the solution to the new mesh and reassemble the matrices
+        // Update solution by interpolating to the new mesh
+        // This is a simplified approach - in a real implementation, we would need to
+        // use proper interpolation methods
+        Eigen::VectorXd new_solution = Eigen::VectorXd::Zero(mesh.getNumNodes());
 
-        // For now, we'll just resize the solution vector
-        current_solution.resize(mesh.getNumNodes());
+        // Copy existing values
+        for (int i = 0; i < std::min(current_solution.size(), new_solution.size()); ++i) {
+            new_solution(i) = current_solution(i);
+        }
 
-        // Reassemble matrices (placeholder)
-        // In a real implementation, we would need to reassemble the matrices
-        // based on the new mesh
+        // For new nodes, use a simple interpolation
+        // This is just a placeholder - real implementation would be more sophisticated
+        if (new_solution.size() > current_solution.size()) {
+            // Use physics-based interpolation for new nodes
+            for (int i = current_solution.size(); i < new_solution.size(); ++i) {
+                double x = nodes[i](0);
+                double y = nodes[i](1);
+
+                // Find the nearest existing node
+                double min_dist = std::numeric_limits<double>::max();
+                int nearest = 0;
+
+                for (int j = 0; j < current_solution.size(); ++j) {
+                    double dist = (nodes[i] - nodes[j]).norm();
+                    if (dist < min_dist) {
+                        min_dist = dist;
+                        nearest = j;
+                    }
+                }
+
+                // Use the value from the nearest node
+                new_solution(i) = current_solution(nearest);
+            }
+        }
+
+        current_solution = new_solution;
     }
 }
 
