@@ -100,7 +100,10 @@ bool CompressedBlock::decompress(void* dest, size_t dest_size) const {
 
     // Calculate decompression time
     auto end_time = std::chrono::high_resolution_clock::now();
-    stats_.decompression_time = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+    // We need to modify the stats, but it's const, so we need to use const_cast
+    // This is safe because we know the object is not actually const
+    CompressionStats& mutable_stats = const_cast<CompressionStats&>(stats_);
+    mutable_stats.decompression_time = std::chrono::duration<double, std::milli>(end_time - start_time).count();
 
     // Check if decompression was successful
     if (decompressed_data.empty() || decompressed_data.size() != original_size_) {
