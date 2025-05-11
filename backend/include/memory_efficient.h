@@ -200,11 +200,8 @@ public:
      * @brief Constructs a new DistributedVector object.
      *
      * @param size The global size of the vector
-     * @param comm The MPI communicator to use
-     *
-     * @throws std::runtime_error If MPI is not available
      */
-    DistributedVector(int size, MPI_Comm comm = MPI_COMM_WORLD);
+    DistributedVector(int size);
 
     /**
      * @brief Destructor for the DistributedVector object.
@@ -313,7 +310,6 @@ private:
     int size_;                  ///< The global size of the vector
     int local_size_;            ///< The local size of the vector on this process
     int global_start_;          ///< The global index of the first element on this process
-    MPI_Comm comm_;             ///< The MPI communicator
     Eigen::Matrix<Scalar, Eigen::Dynamic, 1> local_data_; ///< The local data on this process
 
     /**
