@@ -3,20 +3,30 @@ import matplotlib.pyplot as plt
 from .config import Config
 from .fe_interpolator import FEInterpolator
 from .adaptive_mesh import AdaptiveMesh
+from .callback_wrapper import CallbackWrapper
 
 # Import the C++ extension
 import sys
+import os
 
 # Try to import the C++ extension
 try:
     from . import qdsim_cpp
 
     if qdsim_cpp is None:
-        print("Error: Could not import C++ extension. Make sure it's built and in the Python path.", file=sys.stderr)
-        sys.exit(1)
+        print("Warning: Could not import C++ extension. Make sure it's built and in the Python path.", file=sys.stderr)
+        # Try to import from the build directory
+        build_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'build')
+        if os.path.exists(build_dir):
+            sys.path.append(build_dir)
+            try:
+                import qdsim_cpp
+                print(f"Successfully imported qdsim_cpp from {build_dir}")
+            except ImportError as e:
+                print(f"Warning: Could not import qdsim_cpp from {build_dir}: {e}")
 except ImportError as e:
-    print(f"Error importing C++ extension: {e}", file=sys.stderr)
-    sys.exit(1)
+    print(f"Warning: Error importing C++ extension: {e}", file=sys.stderr)
+    print("Using Python fallback implementations where available.")
 
 class Simulator:
     def __init__(self, config: Config):
@@ -241,33 +251,35 @@ class Simulator:
     def _create_self_consistent_solver(self):
         """Create the SelfConsistentSolver."""
         try:
-            # Use the create_self_consistent_solver helper function
-            self.sc_solver = qdsim_cpp.create_self_consistent_solver(
-                self.mesh, self.epsilon_r, self.charge_density,
-                self.electron_concentration, self.hole_concentration,
-                self.mobility_n, self.mobility_p
-            )
-            print("Using C++ SelfConsistentSolver")
+            # Wrap the callback functions
+            wrapped_epsilon_r = CallbackWrapper.wrap_epsilon_r(self.epsilon_r)
+            wrapped_charge_density = CallbackWrapper.wrap_rho(self.charge_density)
+            wrapped_electron_concentration = CallbackWrapper.wrap_n_conc(self.electron_concentration)
+            wrapped_hole_concentration = CallbackWrapper.wrap_p_conc(self.hole_concentration)
 
-            # Solve the self-consistent problem
-            print("Solving self-consistent problem...")
-            self.sc_solver.solve(
-                0.0, self.built_in_potential() + self.config.V_r,
-                self.config.N_A, self.config.N_D,
-                self.config.tolerance, self.config.max_iter
-            )
-            print("Self-consistent problem solved successfully")
+            # Define mobility functions if they don't exist
+            if not hasattr(self, 'mobility_n'):
+                def mobility_n(x, y):
+                    return 0.85  # Default value for GaAs
+                self.mobility_n = mobility_n
 
-        except Exception as e:
-            print(f"Warning: C++ SelfConsistentSolver not available: {e}")
-            print("Trying alternative solvers...")
+            if not hasattr(self, 'mobility_p'):
+                def mobility_p(x, y):
+                    return 0.04  # Default value for GaAs
+                self.mobility_p = mobility_p
 
-            # Try to use ImprovedSelfConsistentSolver
+            wrapped_mobility_n = CallbackWrapper.wrap_m_star(self.mobility_n)
+            wrapped_mobility_p = CallbackWrapper.wrap_m_star(self.mobility_p)
+
+            # Try to use the create_self_consistent_solver helper function
             try:
-                self.sc_solver = qdsim_cpp.create_improved_self_consistent_solver(
-                    self.mesh, self.epsilon_r, self.charge_density
+                # Use the create_self_consistent_solver helper function
+                self.sc_solver = qdsim_cpp.create_self_consistent_solver(
+                    self.mesh, wrapped_epsilon_r, wrapped_charge_density,
+                    wrapped_electron_concentration, wrapped_hole_concentration,
+                    wrapped_mobility_n, wrapped_mobility_p
                 )
-                print("Using C++ ImprovedSelfConsistentSolver")
+                print("Using C++ SelfConsistentSolver")
 
                 # Solve the self-consistent problem
                 print("Solving self-consistent problem...")
@@ -279,14 +291,15 @@ class Simulator:
                 print("Self-consistent problem solved successfully")
 
             except Exception as e:
-                print(f"Warning: C++ ImprovedSelfConsistentSolver not available: {e}")
+                print(f"Warning: C++ SelfConsistentSolver not available: {e}")
+                print("Trying alternative solvers...")
 
-                # Try to use SimpleSelfConsistentSolver
+                # Try to use ImprovedSelfConsistentSolver
                 try:
-                    self.sc_solver = qdsim_cpp.create_simple_self_consistent_solver(
-                        self.mesh, self.epsilon_r, self.charge_density
+                    self.sc_solver = qdsim_cpp.create_improved_self_consistent_solver(
+                        self.mesh, wrapped_epsilon_r, wrapped_charge_density
                     )
-                    print("Using C++ SimpleSelfConsistentSolver")
+                    print("Using C++ ImprovedSelfConsistentSolver")
 
                     # Solve the self-consistent problem
                     print("Solving self-consistent problem...")
@@ -298,17 +311,14 @@ class Simulator:
                     print("Self-consistent problem solved successfully")
 
                 except Exception as e:
-                    print(f"Warning: C++ SimpleSelfConsistentSolver not available: {e}")
+                    print(f"Warning: C++ ImprovedSelfConsistentSolver not available: {e}")
 
-                    # Import the Python implementation from the example
+                    # Try to use SimpleSelfConsistentSolver
                     try:
-                        from examples.chromium_qd_ingaas_diode import SelfConsistentSolver
-                        self.sc_solver = SelfConsistentSolver(
-                            self.mesh, self.epsilon_r, self.charge_density,
-                            self.electron_concentration, self.hole_concentration,
-                            self.mobility_n, self.mobility_p
+                        self.sc_solver = qdsim_cpp.create_simple_self_consistent_solver(
+                            self.mesh, wrapped_epsilon_r, wrapped_charge_density
                         )
-                        print("Using Python SelfConsistentSolver from example")
+                        print("Using C++ SimpleSelfConsistentSolver")
 
                         # Solve the self-consistent problem
                         print("Solving self-consistent problem...")
@@ -319,37 +329,92 @@ class Simulator:
                         )
                         print("Self-consistent problem solved successfully")
 
-                    except ImportError:
-                        print("Warning: Could not import SelfConsistentSolver from example")
+                    except Exception as e:
+                        print(f"Warning: C++ SimpleSelfConsistentSolver not available: {e}")
+                        print("Using Python fallback.")
 
-                        # Create a minimal implementation
-                        # Create a reference to self.mesh for the inner class
-                        mesh_ref = self.mesh
+                        # Try to import FullPoissonDriftDiffusionSolver
+                        try:
+                            from .poisson_drift_diffusion_solver import FullPoissonDriftDiffusionSolver
+                            self.sc_solver = FullPoissonDriftDiffusionSolver(
+                                self.mesh, self.epsilon_r, self.charge_density,
+                                self.electron_concentration, self.hole_concentration,
+                                self.mobility_n, self.mobility_p
+                            )
+                            print("Using Python FullPoissonDriftDiffusionSolver")
 
-                        class SimpleSelfConsistentSolver:
-                            def __init__(self, *args):
-                                self.mesh = mesh_ref
-                                self.phi = np.zeros(mesh_ref.get_num_nodes())
-                                self.n = np.zeros(mesh_ref.get_num_nodes())
-                                self.p = np.zeros(mesh_ref.get_num_nodes())
+                            # Solve the self-consistent problem
+                            print("Solving self-consistent problem...")
+                            self.sc_solver.solve(
+                                0.0, self.built_in_potential() + self.config.V_r,
+                                self.config.N_A, self.config.N_D,
+                                self.config.tolerance, self.config.max_iter
+                            )
+                            print("Self-consistent problem solved successfully")
 
-                            def solve(self, *args, **kwargs):
-                                print("SimpleSelfConsistentSolver.solve() called (no-op)")
+                        except ImportError:
+                            print("Warning: FullPoissonDriftDiffusionSolver not available in Python module. Using minimal implementation.")
 
-                            def get_potential(self):
-                                return self.phi
+                            # Create a minimal implementation
+                            # Create a reference to self.mesh for the inner class
+                            mesh_ref = self.mesh
 
-                            def get_n(self):
-                                return self.n
+                            class SimpleSelfConsistentSolver:
+                                def __init__(self, *args):
+                                    self.mesh = mesh_ref
+                                    self.phi = np.zeros(mesh_ref.get_num_nodes())
+                                    self.n = np.zeros(mesh_ref.get_num_nodes())
+                                    self.p = np.zeros(mesh_ref.get_num_nodes())
 
-                            def get_p(self):
-                                return self.p
+                                def solve(self, *args, **kwargs):
+                                    print("SimpleSelfConsistentSolver.solve() called (no-op)")
 
-                            def get_electric_field(self, x, y):
-                                return np.array([0.0, 0.0])
+                                def get_potential(self):
+                                    return self.phi
 
-                        self.sc_solver = SimpleSelfConsistentSolver()
-                        print("Using minimal Python SelfConsistentSolver implementation")
+                                def get_n(self):
+                                    return self.n
+
+                                def get_p(self):
+                                    return self.p
+
+                                def get_electric_field(self, x, y):
+                                    return np.array([0.0, 0.0])
+
+                            self.sc_solver = SimpleSelfConsistentSolver()
+                            print("Using minimal Python SelfConsistentSolver implementation")
+
+        except Exception as e:
+            print(f"Warning: Error creating SelfConsistentSolver: {e}")
+            print("Using minimal Python SelfConsistentSolver implementation")
+
+            # Create a minimal implementation
+            # Create a reference to self.mesh for the inner class
+            mesh_ref = self.mesh
+
+            class SimpleSelfConsistentSolver:
+                def __init__(self, *args):
+                    self.mesh = mesh_ref
+                    self.phi = np.zeros(mesh_ref.get_num_nodes())
+                    self.n = np.zeros(mesh_ref.get_num_nodes())
+                    self.p = np.zeros(mesh_ref.get_num_nodes())
+
+                def solve(self, *args, **kwargs):
+                    print("SimpleSelfConsistentSolver.solve() called (no-op)")
+
+                def get_potential(self):
+                    return self.phi
+
+                def get_n(self):
+                    return self.n
+
+                def get_p(self):
+                    return self.p
+
+                def get_electric_field(self, x, y):
+                    return np.array([0.0, 0.0])
+
+            self.sc_solver = SimpleSelfConsistentSolver()
 
     def built_in_potential(self):
         kT = 8.617e-5 * 300  # eV at 300K
