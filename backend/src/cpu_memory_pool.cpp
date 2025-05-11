@@ -16,6 +16,7 @@
 #include <chrono>
 #include <iomanip>
 #include <cstring>
+#include <map>
 
 #ifdef _WIN32
 #include <windows.h>

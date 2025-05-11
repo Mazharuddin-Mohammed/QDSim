@@ -15,7 +15,7 @@
 #include <set>
 #include <cmath>
 
-void AdaptiveMesh::refineMesh(Mesh& mesh, const std::vector<bool>& refine_flags) {
+void AdaptiveMesh::refineMesh(Mesh& mesh, const std::vector<bool>& refine_flags, bool allow_hanging_nodes) {
     // This is a simplified version of the refineMesh function that doesn't use MPI
 
     auto& nodes = const_cast<std::vector<Eigen::Vector2d>&>(mesh.getNodes());
@@ -175,7 +175,7 @@ std::vector<bool> AdaptiveMesh::computeRefinementFlags(const Mesh& mesh, const E
     return refine_flags;
 }
 
-void AdaptiveMesh::smoothMesh(Mesh& mesh) {
+void AdaptiveMesh::smoothMesh(Mesh& mesh, int num_iterations, double quality_threshold) {
     // Smooth the mesh by moving nodes to the average of their neighbors
     auto& nodes = const_cast<std::vector<Eigen::Vector2d>&>(mesh.getNodes());
 

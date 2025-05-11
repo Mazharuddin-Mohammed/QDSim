@@ -20,6 +20,8 @@
 #include <chrono>
 #include <fstream>
 #include <json/json.h>
+#include <Eigen/Dense>
+#include <Eigen/Sparse>
 #include "error_handling.h"
 #include "mesh.h"
 

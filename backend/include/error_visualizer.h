@@ -17,6 +17,7 @@
 #include <functional>
 #include <memory>
 #include <Eigen/Dense>
+#include <Eigen/Sparse>
 #include "mesh.h"
 #include "error_handling.h"
 

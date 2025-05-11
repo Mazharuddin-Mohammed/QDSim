@@ -14,6 +14,9 @@
 #include <algorithm>
 #include <cmath>
 #include <numeric>
+#include <set>
+#include <map>
+#include <iostream>
 
 /**
  * @brief Constructs a new MeshQuality object.

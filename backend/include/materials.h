@@ -63,6 +63,9 @@ struct Material {
     /** @brief Bandgap in electron volts (eV) at 300K */
     double E_g;
 
+    /** @brief Electron affinity in electron volts (eV) */
+    double chi;
+
     /** @brief Conduction band offset in electron volts (eV) */
     double Delta_E_c;
 

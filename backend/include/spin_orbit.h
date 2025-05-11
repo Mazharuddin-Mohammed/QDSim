@@ -49,7 +49,7 @@ public:
      * @param rashba_parameter The Rashba parameter (in eV·nm)
      * @param dresselhaus_parameter The Dresselhaus parameter (in eV·nm)
      */
-    SpinOrbitCoupling(const Mesh& mesh, const Material& material, SpinOrbitType type = SpinOrbitType::NONE,
+    SpinOrbitCoupling(const Mesh& mesh, const Materials::Material& material, SpinOrbitType type = SpinOrbitType::NONE,
                      double rashba_parameter = 0.0, double dresselhaus_parameter = 0.0);
 
     /**
@@ -124,7 +124,7 @@ public:
      * @param electric_field_z The z-component of the electric field (in V/m)
      * @return The Rashba parameter (in eV·nm)
      */
-    static double calculate_rashba_parameter(const Material& material, double electric_field_z);
+    static double calculate_rashba_parameter(const Materials::Material& material, double electric_field_z);
 
     /**
      * @brief Calculates the Dresselhaus parameter from the material properties.
@@ -136,11 +136,11 @@ public:
      * @param material The material to use for the calculation
      * @return The Dresselhaus parameter (in eV·nm)
      */
-    static double calculate_dresselhaus_parameter(const Material& material);
+    static double calculate_dresselhaus_parameter(const Materials::Material& material);
 
 private:
     const Mesh& mesh_;                  ///< The mesh to use for the simulation
-    const Material& material_;          ///< The material to use for the simulation
+    const Materials::Material& material_;          ///< The material to use for the simulation
     SpinOrbitType type_;                ///< The type of spin-orbit coupling to include
     double rashba_parameter_;           ///< The Rashba parameter (in eV·nm)
     double dresselhaus_parameter_;      ///< The Dresselhaus parameter (in eV·nm)

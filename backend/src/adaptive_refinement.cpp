@@ -113,7 +113,7 @@ bool AdaptiveRefinement::refine(const Eigen::VectorXd& solution,
 
         // Sort indices by error indicators in descending order
         std::sort(indices.begin(), indices.end(),
-                 [&error_indicators](size_t i1, size_t i2) {
+                 [this](size_t i1, size_t i2) {
                      return error_indicators[i1] > error_indicators[i2];
                  });
 
@@ -150,7 +150,7 @@ bool AdaptiveRefinement::refine(const Eigen::VectorXd& solution,
 
         // Sort indices by error indicators in descending order
         std::sort(indices.begin(), indices.end(),
-                 [&error_indicators](size_t i1, size_t i2) {
+                 [this](size_t i1, size_t i2) {
                      return error_indicators[i1] > error_indicators[i2];
                  });
 
