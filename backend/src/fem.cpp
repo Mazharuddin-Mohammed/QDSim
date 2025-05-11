@@ -772,28 +772,26 @@ void FEMSolver::assemble_element_matrix(size_t e, Eigen::MatrixXcd& H_e, Eigen::
     double element_area = 0.5 * std::abs(v1(0) * v2(1) - v1(1) * v2(0));
 
     // Define quadrature points and weights based on element order
-    std::vector<Eigen::Vector3d> quad_points;
+    std::vector<Eigen::Vector2d> quad_points;
     std::vector<double> quad_weights;
 
     if (order == 1) {
         // 3-point Gaussian quadrature for P1 elements
-        quad_points = {
-            {1.0/6.0, 1.0/6.0, 2.0/3.0},
-            {1.0/6.0, 2.0/3.0, 1.0/6.0},
-            {2.0/3.0, 1.0/6.0, 1.0/6.0}
-        };
+        quad_points.resize(3);
+        quad_points[0] << 1.0/6.0, 1.0/6.0;
+        quad_points[1] << 1.0/6.0, 2.0/3.0;
+        quad_points[2] << 2.0/3.0, 1.0/6.0;
         quad_weights = {1.0/6.0, 1.0/6.0, 1.0/6.0};
     } else if (order == 2) {
         // 7-point Gaussian quadrature for P2 elements
-        quad_points = {
-            {1.0/3.0, 1.0/3.0, 1.0/3.0},
-            {0.059715871789770, 0.470142064105115, 0.470142064105115},
-            {0.470142064105115, 0.059715871789770, 0.470142064105115},
-            {0.470142064105115, 0.470142064105115, 0.059715871789770},
-            {0.797426985353087, 0.101286507323456, 0.101286507323456},
-            {0.101286507323456, 0.797426985353087, 0.101286507323456},
-            {0.101286507323456, 0.101286507323456, 0.797426985353087}
-        };
+        quad_points.resize(7);
+        quad_points[0] << 1.0/3.0, 1.0/3.0;
+        quad_points[1] << 0.059715871789770, 0.470142064105115;
+        quad_points[2] << 0.470142064105115, 0.059715871789770;
+        quad_points[3] << 0.470142064105115, 0.470142064105115;
+        quad_points[4] << 0.797426985353087, 0.101286507323456;
+        quad_points[5] << 0.101286507323456, 0.797426985353087;
+        quad_points[6] << 0.101286507323456, 0.101286507323456;
         quad_weights = {
             0.225000000000000,
             0.132394152788506,
@@ -805,20 +803,19 @@ void FEMSolver::assemble_element_matrix(size_t e, Eigen::MatrixXcd& H_e, Eigen::
         };
     } else { // order == 3
         // 12-point Gaussian quadrature for P3 elements
-        quad_points = {
-            {0.249286745170910, 0.249286745170910, 0.501426509658179},
-            {0.249286745170910, 0.501426509658179, 0.249286745170910},
-            {0.501426509658179, 0.249286745170910, 0.249286745170910},
-            {0.063089014491502, 0.063089014491502, 0.873821971016996},
-            {0.063089014491502, 0.873821971016996, 0.063089014491502},
-            {0.873821971016996, 0.063089014491502, 0.063089014491502},
-            {0.310352451033785, 0.636502499121399, 0.053145049844816},
-            {0.636502499121399, 0.053145049844816, 0.310352451033785},
-            {0.053145049844816, 0.310352451033785, 0.636502499121399},
-            {0.636502499121399, 0.310352451033785, 0.053145049844816},
-            {0.310352451033785, 0.053145049844816, 0.636502499121399},
-            {0.053145049844816, 0.636502499121399, 0.310352451033785}
-        };
+        quad_points.resize(12);
+        quad_points[0] << 0.249286745170910, 0.249286745170910;
+        quad_points[1] << 0.249286745170910, 0.501426509658179;
+        quad_points[2] << 0.501426509658179, 0.249286745170910;
+        quad_points[3] << 0.063089014491502, 0.063089014491502;
+        quad_points[4] << 0.063089014491502, 0.873821971016996;
+        quad_points[5] << 0.873821971016996, 0.063089014491502;
+        quad_points[6] << 0.310352451033785, 0.636502499121399;
+        quad_points[7] << 0.636502499121399, 0.053145049844816;
+        quad_points[8] << 0.053145049844816, 0.310352451033785;
+        quad_points[9] << 0.636502499121399, 0.310352451033785;
+        quad_points[10] << 0.310352451033785, 0.053145049844816;
+        quad_points[11] << 0.053145049844816, 0.636502499121399;
         quad_weights = {
             0.116786275726379,
             0.116786275726379,
@@ -835,11 +832,7 @@ void FEMSolver::assemble_element_matrix(size_t e, Eigen::MatrixXcd& H_e, Eigen::
         };
     }
 
-<<<<<<< HEAD
     // Define quadrature points and weights based on element order
-    std::vector<Eigen::Vector2d> quad_points;
-    std::vector<double> quad_weights;
-
     // Set up quadrature points and weights for triangular elements
     if (order == 1) {
         // For P1 elements, use 3-point quadrature
@@ -935,8 +928,21 @@ void FEMSolver::assemble_element_matrix(size_t e, Eigen::MatrixXcd& H_e, Eigen::
 
         // Get physical parameters at this point
         double m = m_star(x, y);
-        double V_val = V(x, y);
+        double V_val;
+
+        // Use interpolated potential if enabled, otherwise use the V function
+        if (use_interpolation && potential_values.size() == mesh.getNumNodes()) {
+            // Use the interpolator to get the potential at (x,y)
+            V_val = interpolator->interpolate(x, y, potential_values);
+        } else {
+            // Use the V function directly
+            V_val = V(x, y);
+        }
+
         double eta = cap(x, y);
+
+        // Scale factor for kinetic energy term
+        double kinetic_scale = (hbar * hbar) / (2.0 * m);
 
         // Compute barycentric coordinates for this quadrature point
         std::vector<double> lambda(3);
@@ -963,138 +969,6 @@ void FEMSolver::assemble_element_matrix(size_t e, Eigen::MatrixXcd& H_e, Eigen::
         // Evaluate shape functions and gradients
         interpolator->evaluateShapeFunctions(lambda, shape_values);
         interpolator->evaluateShapeFunctionGradients(lambda, vertices, shape_gradients);
-=======
-    // Compute shape function gradients in reference element
-    std::vector<Eigen::Vector2d> ref_gradients;
-    if (order == 1) {
-        // P1 shape function gradients in reference element
-        ref_gradients = {
-            {-1.0, -1.0},  // dN1/d(xi), dN1/d(eta)
-            {1.0, 0.0},    // dN2/d(xi), dN2/d(eta)
-            {0.0, 1.0}     // dN3/d(xi), dN3/d(eta)
-        };
-    } else if (order == 2) {
-        // P2 shape function gradients in reference element
-        ref_gradients = {
-            {-3.0 + 4.0 * (1.0 - 1.0 - 1.0), -3.0 + 4.0 * (1.0 - 1.0 - 1.0)},  // Vertex 1
-            {4.0 - 4.0 * 2.0, 0.0},                                            // Vertex 2
-            {0.0, 4.0 - 4.0 * 2.0},                                            // Vertex 3
-            {4.0 * 1.0, 4.0 * 1.0},                                            // Edge 1-2
-            {0.0, 4.0 * 1.0},                                                  // Edge 2-3
-            {4.0 * 1.0, 0.0}                                                   // Edge 3-1
-        };
-    } else { // order == 3
-        // P3 shape function gradients in reference element
-        ref_gradients.resize(10);
-
-        // Vertex nodes
-        ref_gradients[0] = Eigen::Vector2d(-9.0 * lambda1 * lambda1 + 9.0 * lambda1 - 1.0, -9.0 * lambda1 * lambda1 + 9.0 * lambda1 - 1.0);
-        ref_gradients[1] = Eigen::Vector2d(9.0 * lambda2 * lambda2 - 9.0 * lambda2 + 1.0, 0.0);
-        ref_gradients[2] = Eigen::Vector2d(0.0, 9.0 * lambda3 * lambda3 - 9.0 * lambda3 + 1.0);
-
-        // Edge nodes (2 per edge)
-        ref_gradients[3] = Eigen::Vector2d(9.0 * lambda1 * (3.0 * lambda2 - 1.0) + 9.0 * lambda2 * (3.0 * lambda1 - 1.0), 9.0 * lambda1 * (3.0 * lambda2 - 1.0));
-        ref_gradients[4] = Eigen::Vector2d(9.0 * lambda1 * (3.0 * lambda2 - 1.0) + 9.0 * lambda2 * (3.0 * lambda1 - 1.0), 9.0 * lambda2 * (3.0 * lambda1 - 1.0));
-
-        ref_gradients[5] = Eigen::Vector2d(9.0 * lambda2 * (3.0 * lambda3 - 1.0), 9.0 * lambda2 * (3.0 * lambda3 - 1.0) + 9.0 * lambda3 * (3.0 * lambda2 - 1.0));
-        ref_gradients[6] = Eigen::Vector2d(9.0 * lambda3 * (3.0 * lambda2 - 1.0), 9.0 * lambda2 * (3.0 * lambda3 - 1.0) + 9.0 * lambda3 * (3.0 * lambda2 - 1.0));
-
-        ref_gradients[7] = Eigen::Vector2d(9.0 * lambda3 * (3.0 * lambda1 - 1.0), 9.0 * lambda3 * (3.0 * lambda1 - 1.0) + 9.0 * lambda1 * (3.0 * lambda3 - 1.0));
-        ref_gradients[8] = Eigen::Vector2d(9.0 * lambda3 * (3.0 * lambda1 - 1.0) + 9.0 * lambda1 * (3.0 * lambda3 - 1.0), 9.0 * lambda1 * (3.0 * lambda3 - 1.0));
-
-        // Interior node
-        ref_gradients[9] = Eigen::Vector2d(27.0 * lambda2 * lambda3, 27.0 * lambda1 * lambda3);
-    }
-
-    // Compute Jacobian matrix for mapping from reference to physical element
-    Eigen::Matrix2d J;
-    J << element_nodes[1](0) - element_nodes[0](0), element_nodes[2](0) - element_nodes[0](0),
-         element_nodes[1](1) - element_nodes[0](1), element_nodes[2](1) - element_nodes[0](1);
-    Eigen::Matrix2d J_inv = J.inverse();
-    double det_J = J.determinant();
-
-    // Loop over quadrature points
-    for (size_t q = 0; q < quad_points.size(); ++q) {
-        // Barycentric coordinates at quadrature point
-        double lambda1 = quad_points[q](0);
-        double lambda2 = quad_points[q](1);
-        double lambda3 = quad_points[q](2);
-
-        // Map from reference element to physical element
-        double x = lambda1 * element_nodes[0](0) + lambda2 * element_nodes[1](0) + lambda3 * element_nodes[2](0);
-        double y = lambda1 * element_nodes[0](1) + lambda2 * element_nodes[1](1) + lambda3 * element_nodes[2](1);
-
-        // Get physical parameters at this point
-        double m = m_star(x, y);
-        double V_val;
-
-        // Use interpolated potential if enabled, otherwise use the V function
-        if (use_interpolation && potential_values.size() == mesh.getNumNodes()) {
-            // Use the interpolator to get the potential at (x,y)
-            V_val = interpolator->interpolate(x, y, potential_values);
-        } else {
-            // Use the V function directly
-            V_val = V(x, y);
-        }
-
-        double eta = cap(x, y);
-
-        // Scale factor for kinetic energy term
-        double kinetic_scale = (hbar * hbar) / (2.0 * m);
-
-        // Compute shape functions and their gradients at quadrature point
-        std::vector<double> shape_values;
-        std::vector<Eigen::Vector2d> shape_gradients;
-
-        if (order == 1) {
-            // P1 shape functions are just the barycentric coordinates
-            shape_values = {lambda1, lambda2, lambda3};
-
-            // Transform gradients from reference to physical element
-            shape_gradients.resize(3);
-            for (int i = 0; i < 3; ++i) {
-                shape_gradients[i] = J_inv.transpose() * ref_gradients[i];
-            }
-        } else if (order == 2) {
-            // P2 shape functions
-            shape_values = {
-                lambda1 * (2.0 * lambda1 - 1.0),  // Vertex 1
-                lambda2 * (2.0 * lambda2 - 1.0),  // Vertex 2
-                lambda3 * (2.0 * lambda3 - 1.0),  // Vertex 3
-                4.0 * lambda1 * lambda2,          // Edge 1-2
-                4.0 * lambda2 * lambda3,          // Edge 2-3
-                4.0 * lambda3 * lambda1           // Edge 3-1
-            };
-
-            // Transform gradients from reference to physical element
-            shape_gradients.resize(6);
-            for (int i = 0; i < 6; ++i) {
-                shape_gradients[i] = J_inv.transpose() * ref_gradients[i];
-            }
-        } else { // order == 3
-            // P3 shape functions
-            shape_values = {
-                lambda1 * (3.0 * lambda1 - 1.0) * (3.0 * lambda1 - 2.0) / 2.0,  // Vertex 1
-                lambda2 * (3.0 * lambda2 - 1.0) * (3.0 * lambda2 - 2.0) / 2.0,  // Vertex 2
-                lambda3 * (3.0 * lambda3 - 1.0) * (3.0 * lambda3 - 2.0) / 2.0,  // Vertex 3
-                9.0 * lambda1 * lambda2 * (3.0 * lambda1 - 1.0) / 2.0,          // Edge 1-2 (near 1)
-                9.0 * lambda1 * lambda2 * (3.0 * lambda2 - 1.0) / 2.0,          // Edge 1-2 (near 2)
-                9.0 * lambda2 * lambda3 * (3.0 * lambda2 - 1.0) / 2.0,          // Edge 2-3 (near 2)
-                9.0 * lambda2 * lambda3 * (3.0 * lambda3 - 1.0) / 2.0,          // Edge 2-3 (near 3)
-                9.0 * lambda3 * lambda1 * (3.0 * lambda3 - 1.0) / 2.0,          // Edge 3-1 (near 3)
-                9.0 * lambda3 * lambda1 * (3.0 * lambda1 - 1.0) / 2.0,          // Edge 3-1 (near 1)
-                27.0 * lambda1 * lambda2 * lambda3                              // Center
-            };
-
-            // Transform gradients from reference to physical element
-            shape_gradients.resize(10);
-            for (int i = 0; i < 10; ++i) {
-                shape_gradients[i] = J_inv.transpose() * ref_gradients[i];
-            }
-        }
-
-        // Quadrature weight scaled by determinant of Jacobian
-        double weight = quad_weights[q] * std::abs(det_J);
 
         // Potential energy term (V + iη)
         std::complex<double> potential(V_val, eta);
@@ -1106,10 +980,10 @@ void FEMSolver::assemble_element_matrix(size_t e, Eigen::MatrixXcd& H_e, Eigen::
                 double grad_dot = shape_gradients[i].dot(shape_gradients[j]);
 
                 // Hamiltonian: H = T + V
-                H_e(i, j) += weight * (kinetic_scale * grad_dot + potential * shape_values[i] * shape_values[j]);
+                H_e(i, j) += quad_weight * (kinetic_scale * grad_dot + potential * shape_values[i] * shape_values[j]);
 
                 // Mass matrix: M = φᵢ · φⱼ
-                M_e(i, j) += weight * shape_values[i] * shape_values[j];
+                M_e(i, j) += quad_weight * shape_values[i] * shape_values[j];
             }
         }
     }
