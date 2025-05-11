@@ -27,6 +27,13 @@
 class ImprovedSelfConsistentSolver {
 public:
     /**
+     * @brief Default constructor for ImprovedSelfConsistentSolver.
+     *
+     * @param mesh The mesh on which to solve the equations.
+     */
+    ImprovedSelfConsistentSolver(Mesh& mesh);
+
+    /**
      * @brief Construct a new ImprovedSelfConsistentSolver object.
      *
      * @param mesh The mesh on which to solve the equations.

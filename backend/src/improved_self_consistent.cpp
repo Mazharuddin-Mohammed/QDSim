@@ -16,6 +16,41 @@
 #include <algorithm>
 #include <Eigen/Sparse>
 
+/**
+ * @brief Default constructor for ImprovedSelfConsistentSolver.
+ *
+ * @param mesh The mesh on which to solve the equations.
+ */
+ImprovedSelfConsistentSolver::ImprovedSelfConsistentSolver(Mesh& mesh)
+    : mesh(mesh),
+      epsilon_r([](double x, double y) -> double { return 12.9; }), // Default value for GaAs
+      rho([](double x, double y, const Eigen::VectorXd& n, const Eigen::VectorXd& p) -> double {
+          double q = 1.602e-19; // Elementary charge in C
+          if (n.size() == 0 || p.size() == 0) {
+              return 0.0;
+          }
+          // Simple charge density calculation
+          return q * (p[0] - n[0]);
+      }) {
+    // Resize vectors
+    int num_nodes = mesh.getNumNodes();
+    potential.resize(num_nodes);
+    n.resize(num_nodes);
+    p.resize(num_nodes);
+
+    // Initialize with zeros
+    potential.setZero();
+    n.setZero();
+    p.setZero();
+}
+
+/**
+ * @brief Constructs a new ImprovedSelfConsistentSolver object.
+ *
+ * @param mesh The mesh on which to solve the equations.
+ * @param epsilon_r Function that returns the relative permittivity at a point (x, y).
+ * @param rho Function that returns the charge density at a point (x, y) given the electron and hole concentrations.
+ */
 ImprovedSelfConsistentSolver::ImprovedSelfConsistentSolver(
     Mesh& mesh,
     std::function<double(double, double)> epsilon_r,
