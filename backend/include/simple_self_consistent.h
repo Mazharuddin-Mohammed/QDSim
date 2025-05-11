@@ -27,6 +27,13 @@
 class SimpleSelfConsistentSolver {
 public:
     /**
+     * @brief Default constructor for SimpleSelfConsistentSolver.
+     *
+     * @param mesh The mesh on which to solve the equations.
+     */
+    SimpleSelfConsistentSolver(Mesh& mesh);
+
+    /**
      * @brief Construct a new SimpleSelfConsistentSolver object.
      *
      * @param mesh The mesh on which to solve the equations.

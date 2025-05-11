@@ -44,6 +44,24 @@ public:
      * @param mu_n Function that returns the electron mobility at a given position
      * @param mu_p Function that returns the hole mobility at a given position
      */
+    /**
+     * @brief Default constructor for SelfConsistentSolver.
+     *
+     * @param mesh Reference to the mesh used for the simulation
+     */
+    SelfConsistentSolver(Mesh& mesh);
+
+    /**
+     * @brief Constructor for SelfConsistentSolver with callback functions.
+     *
+     * @param mesh Reference to the mesh used for the simulation
+     * @param epsilon_r Function that returns the relative permittivity at a given position
+     * @param rho Function that returns the charge density at a given position
+     * @param n_conc Function that returns the electron concentration at a given position
+     * @param p_conc Function that returns the hole concentration at a given position
+     * @param mu_n Function that returns the electron mobility at a given position
+     * @param mu_p Function that returns the hole mobility at a given position
+     */
     SelfConsistentSolver(Mesh& mesh,
                          double (*epsilon_r)(double, double),
                          double (*rho)(double, double, const Eigen::VectorXd&, const Eigen::VectorXd&),
@@ -183,6 +201,7 @@ private:
     Eigen::VectorXd n, p;                ///< Carrier concentrations (electrons and holes)
     Eigen::VectorXd phi_n, phi_p;        ///< Quasi-Fermi potentials for electrons and holes
     Eigen::SparseMatrix<double> Kn, Kp;  ///< Drift-diffusion matrices for electrons and holes
+    double N_A, N_D;                     ///< Doping concentrations
 
     std::vector<Eigen::VectorXd> phi_history;  ///< History of potential vectors for Anderson acceleration
     std::vector<Eigen::VectorXd> res_history;  ///< History of residual vectors for Anderson acceleration
