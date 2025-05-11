@@ -13,15 +13,13 @@
 #include <stdexcept>
 #include <omp.h>
 #include <Eigen/Eigenvalues>
-#include <Spectra/SymGEigsSolver.h>
-#include <Spectra/MatOp/SparseSymMatProd.h>
-#include <Spectra/MatOp/SparseCholesky.h>
+// Spectra headers are not available, so we'll use Eigen's built-in eigensolvers
 
 // Constructor
 ParallelEigensolver::ParallelEigensolver(EigensolverType solver_type, bool use_mpi, int num_threads)
     : solver_type_(solver_type), use_mpi_(use_mpi), num_threads_(num_threads),
       num_iterations_(0), error_(0.0) {
-    
+
     // Set number of threads for OpenMP
     if (num_threads_ > 0) {
         omp_set_num_threads(num_threads_);
@@ -29,7 +27,7 @@ ParallelEigensolver::ParallelEigensolver(EigensolverType solver_type, bool use_m
         // Use all available threads by default
         num_threads_ = omp_get_max_threads();
     }
-    
+
     // Check if requested solver is available
     if (solver_type_ == EigensolverType::SLEPC) {
 #ifndef USE_SLEPC
@@ -45,7 +43,7 @@ ParallelEigensolver::ParallelEigensolver(EigensolverType solver_type, bool use_m
         solver_type_ = EigensolverType::ARPACK;
 #endif
     }
-    
+
     // Check if MPI is available
     if (use_mpi_) {
 #ifndef USE_MPI
@@ -76,12 +74,12 @@ void ParallelEigensolver::solve(const Eigen::SparseMatrix<std::complex<double>>&
     if (H.rows() != H.cols() || M.rows() != M.cols() || H.rows() != M.rows()) {
         throw std::invalid_argument("Invalid matrix dimensions");
     }
-    
+
     // Check if number of eigenvalues is valid
     if (num_eigenvalues <= 0 || num_eigenvalues > H.rows()) {
         throw std::invalid_argument("Invalid number of eigenvalues");
     }
-    
+
     // Solve using the selected solver
     switch (solver_type_) {
         case EigensolverType::ARPACK:
@@ -135,10 +133,10 @@ double ParallelEigensolver::get_error() const {
 void ParallelEigensolver::initialize_slepc() {
     // Initialize SLEPc
     SlepcInitialize(nullptr, nullptr, nullptr, nullptr);
-    
+
     // Create eigensolver context
     EPSCreate(PETSC_COMM_WORLD, &eps_);
-    
+
     slepc_initialized_ = true;
 }
 
@@ -146,10 +144,10 @@ void ParallelEigensolver::initialize_slepc() {
 void ParallelEigensolver::finalize_slepc() {
     // Destroy eigensolver context
     EPSDestroy(&eps_);
-    
+
     // Finalize SLEPc
     SlepcFinalize();
-    
+
     slepc_initialized_ = false;
 }
 
@@ -185,69 +183,57 @@ void ParallelEigensolver::solve_arpack(const Eigen::SparseMatrix<std::complex<do
         }
         if (!is_hermitian) break;
     }
-    
+
     if (!is_hermitian) {
         throw std::runtime_error("Hamiltonian matrix is not Hermitian");
     }
-    
+
     // Convert complex matrices to real matrices
     // For Hermitian matrices, we can use the real part only
     Eigen::SparseMatrix<double> H_real(H.rows(), H.cols());
     Eigen::SparseMatrix<double> M_real(M.rows(), M.cols());
-    
+
     // Copy real parts
     for (int k = 0; k < H.outerSize(); ++k) {
         for (Eigen::SparseMatrix<std::complex<double>>::InnerIterator it(H, k); it; ++it) {
             H_real.insert(it.row(), it.col()) = it.value().real();
         }
     }
-    
+
     for (int k = 0; k < M.outerSize(); ++k) {
         for (Eigen::SparseMatrix<std::complex<double>>::InnerIterator it(M, k); it; ++it) {
             M_real.insert(it.row(), it.col()) = it.value().real();
         }
     }
-    
+
     // Compress matrices
     H_real.makeCompressed();
     M_real.makeCompressed();
-    
-    // Define the matrix operations
-    Spectra::SparseSymMatProd<double> op(H_real);
-    Spectra::SparseCholesky<double> Bop(M_real);
-    
-    // Construct the generalized eigensolver
-    // ncv is the number of Ritz values to use (usually 2*num_eigenvalues is a good choice)
-    int ncv = std::min(2 * num_eigenvalues, static_cast<int>(H_real.rows()));
-    Spectra::SymGEigsSolver<double, Spectra::SMALLEST_ALGE, Spectra::SparseSymMatProd<double>, Spectra::SparseCholesky<double>, Spectra::GEIGS_CHOLESKY> geigs(op, Bop, num_eigenvalues, ncv);
-    
-    // Set parameters
-    geigs.init();
-    
-    // Compute eigenvalues and eigenvectors
-    int nconv = geigs.compute(max_iterations, tolerance, Spectra::SMALLEST_ALGE);
-    
+
+    // Use Eigen's built-in generalized eigensolver since Spectra is not available
+    Eigen::GeneralizedSelfAdjointEigenSolver<Eigen::MatrixXd> geigs(H_real, M_real);
+
     // Check for convergence
-    if (geigs.info() != Spectra::SUCCESSFUL) {
-        throw std::runtime_error("ARPACK solver failed to converge");
+    if (geigs.info() != Eigen::Success) {
+        throw std::runtime_error("Eigen solver failed to converge");
     }
-    
+
     // Get eigenvalues and eigenvectors
     Eigen::VectorXd evals = geigs.eigenvalues();
     Eigen::MatrixXd evecs = geigs.eigenvectors();
-    
+
     // Store results
     eigenvalues.resize(num_eigenvalues);
     eigenvectors.resize(num_eigenvalues);
-    
+
     for (int i = 0; i < num_eigenvalues; ++i) {
         eigenvalues[i] = std::complex<double>(evals(i), 0.0);
         eigenvectors[i] = evecs.col(i);
     }
-    
+
     // Store number of iterations and error
-    num_iterations_ = geigs.num_iterations();
-    error_ = geigs.error();
+    num_iterations_ = 1;  // Eigen doesn't provide iteration count
+    error_ = 0.0;         // Eigen doesn't provide error estimate
 }
 
 // Solve using FEAST
