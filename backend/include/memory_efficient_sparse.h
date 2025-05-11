@@ -47,6 +47,36 @@ public:
     MemoryEfficientSparseMatrix(const Eigen::SparseMatrix<Scalar>& matrix);
 
     /**
+     * @brief Copy constructor for the MemoryEfficientSparseMatrix object.
+     *
+     * @param other The matrix to copy
+     */
+    MemoryEfficientSparseMatrix(const MemoryEfficientSparseMatrix<Scalar>& other);
+
+    /**
+     * @brief Move constructor for the MemoryEfficientSparseMatrix object.
+     *
+     * @param other The matrix to move
+     */
+    MemoryEfficientSparseMatrix(MemoryEfficientSparseMatrix<Scalar>&& other) noexcept;
+
+    /**
+     * @brief Copy assignment operator for the MemoryEfficientSparseMatrix object.
+     *
+     * @param other The matrix to copy
+     * @return A reference to this matrix
+     */
+    MemoryEfficientSparseMatrix<Scalar>& operator=(const MemoryEfficientSparseMatrix<Scalar>& other);
+
+    /**
+     * @brief Move assignment operator for the MemoryEfficientSparseMatrix object.
+     *
+     * @param other The matrix to move
+     * @return A reference to this matrix
+     */
+    MemoryEfficientSparseMatrix<Scalar>& operator=(MemoryEfficientSparseMatrix<Scalar>&& other) noexcept;
+
+    /**
      * @brief Destructor for the MemoryEfficientSparseMatrix object.
      */
     ~MemoryEfficientSparseMatrix();
@@ -169,6 +199,14 @@ public:
      * @return The determinant
      */
     Scalar determinant() const;
+
+    /**
+     * @brief Check if a matrix is Hermitian (self-adjoint).
+     *
+     * @param matrix The matrix to check
+     * @return True if the matrix is Hermitian, false otherwise
+     */
+    bool isHermitian(const Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>& matrix) const;
 
     /**
      * @brief Computes the inverse of the matrix.

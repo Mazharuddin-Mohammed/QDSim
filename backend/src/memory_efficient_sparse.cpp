@@ -63,6 +63,66 @@ MemoryEfficientSparseMatrix<Scalar>::MemoryEfficientSparseMatrix(const Eigen::Sp
     }
 }
 
+// Copy constructor
+template <typename Scalar>
+MemoryEfficientSparseMatrix<Scalar>::MemoryEfficientSparseMatrix(const MemoryEfficientSparseMatrix<Scalar>& other)
+    : rows_(other.rows_), cols_(other.cols_), non_zeros_(other.non_zeros_),
+      row_ptr_(other.row_ptr_), col_ind_(other.col_ind_), values_(other.values_),
+      memory_pool_(CPUMemoryPool::getInstance()) {
+}
+
+// Move constructor
+template <typename Scalar>
+MemoryEfficientSparseMatrix<Scalar>::MemoryEfficientSparseMatrix(MemoryEfficientSparseMatrix<Scalar>&& other) noexcept
+    : rows_(other.rows_), cols_(other.cols_), non_zeros_(other.non_zeros_),
+      memory_pool_(CPUMemoryPool::getInstance()) {
+
+    // Move data from other
+    row_ptr_ = std::move(other.row_ptr_);
+    col_ind_ = std::move(other.col_ind_);
+    values_ = std::move(other.values_);
+
+    // Reset other
+    other.rows_ = 0;
+    other.cols_ = 0;
+    other.non_zeros_ = 0;
+}
+
+// Copy assignment operator
+template <typename Scalar>
+MemoryEfficientSparseMatrix<Scalar>& MemoryEfficientSparseMatrix<Scalar>::operator=(const MemoryEfficientSparseMatrix<Scalar>& other) {
+    if (this != &other) {
+        // Copy data from other
+        rows_ = other.rows_;
+        cols_ = other.cols_;
+        non_zeros_ = other.non_zeros_;
+        row_ptr_ = other.row_ptr_;
+        col_ind_ = other.col_ind_;
+        values_ = other.values_;
+    }
+    return *this;
+}
+
+// Move assignment operator
+template <typename Scalar>
+MemoryEfficientSparseMatrix<Scalar>& MemoryEfficientSparseMatrix<Scalar>::operator=(MemoryEfficientSparseMatrix<Scalar>&& other) noexcept {
+    if (this != &other) {
+        // Move data from other
+        rows_ = other.rows_;
+        cols_ = other.cols_;
+        non_zeros_ = other.non_zeros_;
+        row_ptr_ = std::move(other.row_ptr_);
+        col_ind_ = std::move(other.col_ind_);
+        values_ = std::move(other.values_);
+
+        // Reset other
+        other.rows_ = 0;
+        other.cols_ = 0;
+        other.non_zeros_ = 0;
+    }
+    return *this;
+}
+
 // Destructor
 template <typename Scalar>
 MemoryEfficientSparseMatrix<Scalar>::~MemoryEfficientSparseMatrix() {
@@ -547,11 +607,13 @@ void MemoryEfficientSparseMatrix<Scalar>::eigensolve(
     // Convert to Eigen sparse matrix
     Eigen::SparseMatrix<Scalar> eigen_matrix = this->toEigen();
 
-    // For small matrices, convert to dense and use dense eigensolvers
-    if (rows_ <= 100) {
-        Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> dense_matrix = eigen_matrix;
+    // Convert to dense matrix and use Eigen's built-in eigensolvers
+    Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> dense_matrix = eigen_matrix;
 
-        Eigen::EigenSolver<Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>> solver(dense_matrix);
+    // Use Eigen's SelfAdjointEigenSolver for Hermitian matrices
+    // or EigenSolver for general matrices
+    if (isHermitian(dense_matrix)) {
+        Eigen::SelfAdjointEigenSolver<Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>> solver(dense_matrix);
 
         if (solver.info() != Eigen::Success) {
             throw std::runtime_error("Failed to compute eigendecomposition");
@@ -566,11 +628,7 @@ void MemoryEfficientSparseMatrix<Scalar>::eigensolve(
             eigenvectors[i] = solver.eigenvectors().col(i);
         }
     } else {
-        // For larger matrices, use sparse eigensolvers
-        Eigen::SparseGenEigsSolver<Eigen::SparseMatrix<Scalar>> solver(eigen_matrix, num_eigenvalues);
-
-        solver.init();
-        solver.compute();
+        Eigen::ComplexEigenSolver<Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>> solver(dense_matrix);
 
         if (solver.info() != Eigen::Success) {
             throw std::runtime_error("Failed to compute eigendecomposition");
@@ -650,6 +708,19 @@ bool MemoryEfficientSparseMatrix<Scalar>::load(const std::string& filename) {
     file.read(reinterpret_cast<char*>(values_.data()), values_size * sizeof(Scalar));
 
     return true;
+}
+
+// Check if a matrix is Hermitian (self-adjoint)
+template <typename Scalar>
+bool MemoryEfficientSparseMatrix<Scalar>::isHermitian(const Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>& matrix) const {
+    // Check if the matrix is square
+    if (matrix.rows() != matrix.cols()) {
+        return false;
+    }
+
+    // Check if the matrix is equal to its conjugate transpose
+    const double tolerance = 1e-10;
+    return (matrix - matrix.adjoint()).norm() < tolerance;
 }
 
 // Explicit instantiations
