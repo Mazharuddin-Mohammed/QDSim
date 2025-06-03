@@ -251,11 +251,14 @@ class Simulator:
     def _create_self_consistent_solver(self):
         """Create the SelfConsistentSolver."""
         try:
+            # Import the correct callback wrapper functions
+            from .callback_wrapper import wrap_epsilon_r, wrap_rho, wrap_n_conc, wrap_p_conc, wrap_m_star
+
             # Wrap the callback functions
-            wrapped_epsilon_r = CallbackWrapper.wrap_epsilon_r(self.epsilon_r)
-            wrapped_charge_density = CallbackWrapper.wrap_rho(self.charge_density)
-            wrapped_electron_concentration = CallbackWrapper.wrap_n_conc(self.electron_concentration)
-            wrapped_hole_concentration = CallbackWrapper.wrap_p_conc(self.hole_concentration)
+            wrapped_epsilon_r = wrap_epsilon_r(self.epsilon_r)
+            wrapped_charge_density = wrap_rho(self.charge_density)
+            wrapped_electron_concentration = wrap_n_conc(self.electron_concentration)
+            wrapped_hole_concentration = wrap_p_conc(self.hole_concentration)
 
             # Define mobility functions if they don't exist
             if not hasattr(self, 'mobility_n'):
@@ -268,8 +271,8 @@ class Simulator:
                     return 0.04  # Default value for GaAs
                 self.mobility_p = mobility_p
 
-            wrapped_mobility_n = CallbackWrapper.wrap_m_star(self.mobility_n)
-            wrapped_mobility_p = CallbackWrapper.wrap_m_star(self.mobility_p)
+            wrapped_mobility_n = wrap_m_star(self.mobility_n)
+            wrapped_mobility_p = wrap_m_star(self.mobility_p)
 
             # Try to use the create_self_consistent_solver helper function
             try:

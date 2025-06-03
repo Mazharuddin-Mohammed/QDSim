@@ -36,6 +36,7 @@
 #include "gpu_accelerator.h"
 #include "adaptive_mesh.h"
 #include "full_poisson_dd_solver.h"
+#include "callback_system.h"
 #include <pybind11/pybind11.h>
 #include <pybind11/eigen.h>
 #include <pybind11/stl.h>
@@ -1876,4 +1877,20 @@ PYBIND11_MODULE(qdsim_cpp, m) {
         .def("enable_adaptive_mesh_refinement", &FullPoissonDriftDiffusionSolver::enable_adaptive_mesh_refinement,
              pybind11::arg("enable"), pybind11::arg("refinement_threshold") = 0.1, pybind11::arg("max_refinement_level") = 3,
              "Enable or disable adaptive mesh refinement");
+
+    // Callback system functions
+    m.def("setCallback", &setCallback,
+          pybind11::arg("name"), pybind11::arg("callback"),
+          "Set a Python callback function");
+    m.def("getCallback", &getCallback,
+          pybind11::arg("name"),
+          "Get a Python callback function");
+    m.def("clearCallbacks", &clearCallbacks,
+          "Clear all Python callback functions");
+    m.def("clearCallback", &clearCallback,
+          pybind11::arg("name"),
+          "Clear a specific Python callback function");
+    m.def("hasCallback", &hasCallback,
+          pybind11::arg("name"),
+          "Check if a callback with the given name exists");
 }

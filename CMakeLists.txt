@@ -65,6 +65,7 @@ set(SOURCES
     backend/src/gpu_eigensolver.cu
     backend/src/gpu_memory_pool.cpp
     backend/src/full_poisson_dd_solver.cpp
+    backend/src/callback_system.cpp
     backend/src/bindings.cpp
 )
 
@@ -101,6 +102,7 @@ set(STATIC_SOURCES
     backend/src/gpu_eigensolver.cu
     backend/src/gpu_cusolver.cu
     backend/src/gpu_memory_pool.cpp
+    backend/src/callback_system.cpp
     backend/src/full_poisson_dd_solver.cpp
 )
 add_library(qdsim_static STATIC ${STATIC_SOURCES})
