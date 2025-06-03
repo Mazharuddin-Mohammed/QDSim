@@ -6,11 +6,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_STANDARD 14)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
-# Option to enable/disable MPI at compile time
+# Build options for unified parallel architecture
 option(USE_MPI "Enable MPI support" ON)
-
-# Option to enable/disable CUDA at compile time
+option(USE_OPENMP "Enable OpenMP support" ON)
 option(USE_CUDA "Enable CUDA support" ON)
+option(USE_PYTHON_INTEGRATION "Enable Python integration" ON)
+option(BUILD_TESTS "Build test suite" ON)
+option(USE_NUMA "Enable NUMA support" ON)
 
 find_package(Eigen3 REQUIRED)
 find_package(pybind11 REQUIRED)
@@ -18,10 +20,25 @@ find_package(pybind11 REQUIRED)
 include_directories(${CMAKE_SOURCE_DIR}/backend/include)
 include_directories(${EIGEN3_INCLUDE_DIR})
 
+# OpenMP support
+if(USE_OPENMP)
+    find_package(OpenMP REQUIRED)
+    add_definitions(-DUSE_OPENMP)
+endif()
+
+# MPI support
 if(USE_MPI)
     find_package(MPI REQUIRED)
     include_directories(${MPI_CXX_INCLUDE_PATH})
     add_definitions(-DUSE_MPI)
+endif()
+
+# NUMA support (Linux only)
+if(USE_NUMA AND UNIX AND NOT APPLE)
+    find_library(NUMA_LIBRARY numa)
+    if(NUMA_LIBRARY)
+        add_definitions(-DUSE_NUMA)
+    endif()
 endif()
 
 if(USE_CUDA)
@@ -43,6 +60,7 @@ if(USE_CUDA)
 endif()
 
 set(SOURCES
+    # Original sources
     backend/src/mesh.cpp
     backend/src/fem.cpp
     backend/src/physics.cpp
@@ -67,19 +85,34 @@ set(SOURCES
     backend/src/full_poisson_dd_solver.cpp
     backend/src/callback_system.cpp
     backend/src/bindings.cpp
+
+    # Unified parallel architecture sources
+    backend/src/unified_parallel_manager.cpp
+    backend/src/unified_memory_manager.cpp
+    backend/src/async_gpu_execution_manager.cpp
+    backend/src/fused_gpu_kernels.cu
 )
 
 pybind11_add_module(qdsim_cpp ${SOURCES})
 target_link_libraries(qdsim_cpp PRIVATE pybind11::module)
+
+# Link libraries for unified parallel architecture
+if(USE_OPENMP)
+    target_link_libraries(qdsim_cpp PRIVATE OpenMP::OpenMP_CXX)
+endif()
 if(USE_MPI)
     target_link_libraries(qdsim_cpp PRIVATE ${MPI_CXX_LIBRARIES})
 endif()
 if(USE_CUDA)
     target_link_libraries(qdsim_cpp PRIVATE ${CUDA_LIBRARIES} ${CUBLAS_LIBRARY} ${CUSOLVER_LIBRARY} ${CUSPARSE_LIBRARY})
 endif()
+if(USE_NUMA AND NUMA_LIBRARY)
+    target_link_libraries(qdsim_cpp PRIVATE ${NUMA_LIBRARY})
+endif()
 
 # Create a static library for QDSim (excluding Python bindings)
 set(STATIC_SOURCES
+    # Original sources
     backend/src/mesh.cpp
     backend/src/fem.cpp
     backend/src/physics.cpp
@@ -104,14 +137,28 @@ set(STATIC_SOURCES
     backend/src/gpu_memory_pool.cpp
     backend/src/callback_system.cpp
     backend/src/full_poisson_dd_solver.cpp
+
+    # Unified parallel architecture sources
+    backend/src/unified_parallel_manager.cpp
+    backend/src/unified_memory_manager.cpp
+    backend/src/async_gpu_execution_manager.cpp
+    backend/src/fused_gpu_kernels.cu
 )
 add_library(qdsim_static STATIC ${STATIC_SOURCES})
 target_link_libraries(qdsim_static PRIVATE ${EIGEN3_LIBRARIES})
+
+# Link libraries for unified parallel architecture
+if(USE_OPENMP)
+    target_link_libraries(qdsim_static PRIVATE OpenMP::OpenMP_CXX)
+endif()
 if(USE_MPI)
     target_link_libraries(qdsim_static PRIVATE ${MPI_CXX_LIBRARIES})
 endif()
 if(USE_CUDA)
     target_link_libraries(qdsim_static PRIVATE ${CUDA_LIBRARIES} ${CUBLAS_LIBRARY} ${CUSOLVER_LIBRARY} ${CUSPARSE_LIBRARY})
+endif()
+if(USE_NUMA AND NUMA_LIBRARY)
+    target_link_libraries(qdsim_static PRIVATE ${NUMA_LIBRARY})
 endif()
 
 # Add the GPU acceleration test executable
