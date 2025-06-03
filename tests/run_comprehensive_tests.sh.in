@@ -1,0 +1,352 @@
+#!/bin/bash
+
+# QDSim Comprehensive Testing Framework Runner
+# This script runs all testing categories with proper environment setup
+
+set -e
+
+# Configuration
+BUILD_DIR="@CMAKE_CURRENT_BINARY_DIR@"
+SOURCE_DIR="@CMAKE_CURRENT_SOURCE_DIR@"
+ENABLE_CUDA="@USE_CUDA@"
+ENABLE_MPI="@USE_MPI@"
+ENABLE_OPENMP="@USE_OPENMP@"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Logging
+LOG_DIR="${BUILD_DIR}/test_reports"
+mkdir -p "${LOG_DIR}"
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+MAIN_LOG="${LOG_DIR}/comprehensive_test_${TIMESTAMP}.log"
+
+echo "QDSim Comprehensive Testing Framework" | tee "${MAIN_LOG}"
+echo "=====================================" | tee -a "${MAIN_LOG}"
+echo "Timestamp: $(date)" | tee -a "${MAIN_LOG}"
+echo "Build Directory: ${BUILD_DIR}" | tee -a "${MAIN_LOG}"
+echo "CUDA Enabled: ${ENABLE_CUDA}" | tee -a "${MAIN_LOG}"
+echo "MPI Enabled: ${ENABLE_MPI}" | tee -a "${MAIN_LOG}"
+echo "OpenMP Enabled: ${ENABLE_OPENMP}" | tee -a "${MAIN_LOG}"
+echo "" | tee -a "${MAIN_LOG}"
+
+# Function to run test category
+run_test_category() {
+    local category="$1"
+    local description="$2"
+    local log_file="${LOG_DIR}/${category}_${TIMESTAMP}.log"
+    
+    echo -e "${BLUE}Running ${description}...${NC}" | tee -a "${MAIN_LOG}"
+    echo "Log file: ${log_file}" | tee -a "${MAIN_LOG}"
+    
+    if ctest -L "${category}" --output-on-failure --verbose > "${log_file}" 2>&1; then
+        echo -e "${GREEN}✓ ${description} PASSED${NC}" | tee -a "${MAIN_LOG}"
+        return 0
+    else
+        echo -e "${RED}✗ ${description} FAILED${NC}" | tee -a "${MAIN_LOG}"
+        echo "Check log: ${log_file}" | tee -a "${MAIN_LOG}"
+        return 1
+    fi
+}
+
+# Function to run sanitizer tests
+run_sanitizer_tests() {
+    local sanitizer="$1"
+    local description="$2"
+    local log_file="${LOG_DIR}/sanitizer_${sanitizer}_${TIMESTAMP}.log"
+    
+    echo -e "${BLUE}Running ${description}...${NC}" | tee -a "${MAIN_LOG}"
+    
+    # Set appropriate environment variables
+    case "${sanitizer}" in
+        "tsan")
+            export TSAN_OPTIONS="halt_on_error=1:abort_on_error=1:detect_thread_leaks=1:history_size=7"
+            ;;
+        "asan")
+            export ASAN_OPTIONS="halt_on_error=1:abort_on_error=1:detect_leaks=1:check_initialization_order=1"
+            ;;
+        "msan")
+            export MSAN_OPTIONS="halt_on_error=1:abort_on_error=1:print_stats=1"
+            ;;
+    esac
+    
+    if ctest -R ".*_${sanitizer}" --output-on-failure --verbose > "${log_file}" 2>&1; then
+        echo -e "${GREEN}✓ ${description} PASSED${NC}" | tee -a "${MAIN_LOG}"
+        return 0
+    else
+        echo -e "${RED}✗ ${description} FAILED${NC}" | tee -a "${MAIN_LOG}"
+        echo "Check log: ${log_file}" | tee -a "${MAIN_LOG}"
+        return 1
+    fi
+}
+
+# Function to run CUDA-specific tests
+run_cuda_tests() {
+    if [ "${ENABLE_CUDA}" != "ON" ]; then
+        echo -e "${YELLOW}CUDA tests skipped (CUDA not enabled)${NC}" | tee -a "${MAIN_LOG}"
+        return 0
+    fi
+    
+    # Check if CUDA is available
+    if ! command -v nvidia-smi &> /dev/null; then
+        echo -e "${YELLOW}CUDA tests skipped (nvidia-smi not found)${NC}" | tee -a "${MAIN_LOG}"
+        return 0
+    fi
+    
+    echo -e "${BLUE}Running CUDA-specific tests...${NC}" | tee -a "${MAIN_LOG}"
+    
+    # Run basic CUDA tests
+    local log_file="${LOG_DIR}/cuda_tests_${TIMESTAMP}.log"
+    if ctest -R "cuda" --output-on-failure --verbose > "${log_file}" 2>&1; then
+        echo -e "${GREEN}✓ CUDA tests PASSED${NC}" | tee -a "${MAIN_LOG}"
+    else
+        echo -e "${RED}✗ CUDA tests FAILED${NC}" | tee -a "${MAIN_LOG}"
+        return 1
+    fi
+    
+    # Run CUDA-memcheck if available
+    if command -v cuda-memcheck &> /dev/null; then
+        echo -e "${BLUE}Running CUDA memory checks...${NC}" | tee -a "${MAIN_LOG}"
+        local memcheck_log="${LOG_DIR}/cuda_memcheck_${TIMESTAMP}.log"
+        
+        if ctest -R "cuda_memcheck" --output-on-failure --verbose > "${memcheck_log}" 2>&1; then
+            echo -e "${GREEN}✓ CUDA memory checks PASSED${NC}" | tee -a "${MAIN_LOG}"
+        else
+            echo -e "${YELLOW}⚠ CUDA memory checks had issues (check log)${NC}" | tee -a "${MAIN_LOG}"
+        fi
+    else
+        echo -e "${YELLOW}CUDA-memcheck not available${NC}" | tee -a "${MAIN_LOG}"
+    fi
+    
+    return 0
+}
+
+# Function to run MPI tests
+run_mpi_tests() {
+    if [ "${ENABLE_MPI}" != "ON" ]; then
+        echo -e "${YELLOW}MPI tests skipped (MPI not enabled)${NC}" | tee -a "${MAIN_LOG}"
+        return 0
+    fi
+    
+    echo -e "${BLUE}Running MPI tests...${NC}" | tee -a "${MAIN_LOG}"
+    
+    local log_file="${LOG_DIR}/mpi_tests_${TIMESTAMP}.log"
+    if ctest -R "mpi" --output-on-failure --verbose > "${log_file}" 2>&1; then
+        echo -e "${GREEN}✓ MPI tests PASSED${NC}" | tee -a "${MAIN_LOG}"
+        return 0
+    else
+        echo -e "${RED}✗ MPI tests FAILED${NC}" | tee -a "${MAIN_LOG}"
+        return 1
+    fi
+}
+
+# Function to generate summary report
+generate_summary() {
+    local total_tests="$1"
+    local passed_tests="$2"
+    local failed_tests="$3"
+    
+    echo "" | tee -a "${MAIN_LOG}"
+    echo "Test Summary" | tee -a "${MAIN_LOG}"
+    echo "============" | tee -a "${MAIN_LOG}"
+    echo "Total test categories: ${total_tests}" | tee -a "${MAIN_LOG}"
+    echo "Passed: ${passed_tests}" | tee -a "${MAIN_LOG}"
+    echo "Failed: ${failed_tests}" | tee -a "${MAIN_LOG}"
+    
+    if [ "${failed_tests}" -eq 0 ]; then
+        echo -e "${GREEN}🎉 All tests PASSED!${NC}" | tee -a "${MAIN_LOG}"
+    else
+        echo -e "${RED}❌ ${failed_tests} test categories FAILED${NC}" | tee -a "${MAIN_LOG}"
+    fi
+    
+    echo "" | tee -a "${MAIN_LOG}"
+    echo "Detailed logs available in: ${LOG_DIR}" | tee -a "${MAIN_LOG}"
+    echo "Main log: ${MAIN_LOG}" | tee -a "${MAIN_LOG}"
+}
+
+# Change to build directory
+cd "${BUILD_DIR}"
+
+# Initialize counters
+total_categories=0
+passed_categories=0
+failed_categories=0
+
+# Parse command line arguments
+QUICK_MODE=false
+SANITIZER_MODE=false
+PERFORMANCE_MODE=false
+STRESS_MODE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --quick)
+            QUICK_MODE=true
+            shift
+            ;;
+        --sanitizers)
+            SANITIZER_MODE=true
+            shift
+            ;;
+        --performance)
+            PERFORMANCE_MODE=true
+            shift
+            ;;
+        --stress)
+            STRESS_MODE=true
+            shift
+            ;;
+        --help)
+            echo "Usage: $0 [OPTIONS]"
+            echo "Options:"
+            echo "  --quick       Run only quick tests (exclude stress tests)"
+            echo "  --sanitizers  Run sanitizer tests"
+            echo "  --performance Run performance benchmarks"
+            echo "  --stress      Run stress tests only"
+            echo "  --help        Show this help message"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
+
+# Run test categories based on mode
+if [ "${STRESS_MODE}" = true ]; then
+    echo "Running stress tests only..." | tee -a "${MAIN_LOG}"
+    
+    total_categories=$((total_categories + 1))
+    if run_test_category "stress" "Stress Tests"; then
+        passed_categories=$((passed_categories + 1))
+    else
+        failed_categories=$((failed_categories + 1))
+    fi
+    
+elif [ "${QUICK_MODE}" = true ]; then
+    echo "Running quick tests (excluding stress tests)..." | tee -a "${MAIN_LOG}"
+    
+    # Parallel correctness tests
+    total_categories=$((total_categories + 1))
+    if run_test_category "parallel_correctness" "Parallel Correctness Tests"; then
+        passed_categories=$((passed_categories + 1))
+    else
+        failed_categories=$((failed_categories + 1))
+    fi
+    
+    # Cross-platform tests
+    total_categories=$((total_categories + 1))
+    if run_test_category "cross_platform" "Cross-Platform Validation Tests"; then
+        passed_categories=$((passed_categories + 1))
+    else
+        failed_categories=$((failed_categories + 1))
+    fi
+    
+    # Integration tests
+    total_categories=$((total_categories + 1))
+    if run_test_category "integration" "Integration Tests"; then
+        passed_categories=$((passed_categories + 1))
+    else
+        failed_categories=$((failed_categories + 1))
+    fi
+    
+else
+    echo "Running comprehensive test suite..." | tee -a "${MAIN_LOG}"
+    
+    # 1. Parallel Correctness Tests
+    total_categories=$((total_categories + 1))
+    if run_test_category "parallel_correctness" "Parallel Correctness Tests"; then
+        passed_categories=$((passed_categories + 1))
+    else
+        failed_categories=$((failed_categories + 1))
+    fi
+    
+    # 2. Performance Benchmarking Tests
+    if [ "${PERFORMANCE_MODE}" = true ] || [ "${QUICK_MODE}" = false ]; then
+        total_categories=$((total_categories + 1))
+        if run_test_category "performance" "Performance Benchmarking Tests"; then
+            passed_categories=$((passed_categories + 1))
+        else
+            failed_categories=$((failed_categories + 1))
+        fi
+    fi
+    
+    # 3. Cross-Platform Validation Tests
+    total_categories=$((total_categories + 1))
+    if run_test_category "cross_platform" "Cross-Platform Validation Tests"; then
+        passed_categories=$((passed_categories + 1))
+    else
+        failed_categories=$((failed_categories + 1))
+    fi
+    
+    # 4. Integration Tests
+    total_categories=$((total_categories + 1))
+    if run_test_category "integration" "Integration Tests"; then
+        passed_categories=$((passed_categories + 1))
+    else
+        failed_categories=$((failed_categories + 1))
+    fi
+    
+    # 5. CUDA-specific tests
+    total_categories=$((total_categories + 1))
+    if run_cuda_tests; then
+        passed_categories=$((passed_categories + 1))
+    else
+        failed_categories=$((failed_categories + 1))
+    fi
+    
+    # 6. MPI-specific tests
+    total_categories=$((total_categories + 1))
+    if run_mpi_tests; then
+        passed_categories=$((passed_categories + 1))
+    else
+        failed_categories=$((failed_categories + 1))
+    fi
+    
+    # 7. Stress Tests (if not in quick mode)
+    if [ "${QUICK_MODE}" = false ]; then
+        total_categories=$((total_categories + 1))
+        if run_test_category "stress" "Stress Tests"; then
+            passed_categories=$((passed_categories + 1))
+        else
+            failed_categories=$((failed_categories + 1))
+        fi
+    fi
+fi
+
+# Run sanitizer tests if requested
+if [ "${SANITIZER_MODE}" = true ]; then
+    echo "" | tee -a "${MAIN_LOG}"
+    echo "Running Sanitizer Tests..." | tee -a "${MAIN_LOG}"
+    
+    # ThreadSanitizer
+    total_categories=$((total_categories + 1))
+    if run_sanitizer_tests "tsan" "ThreadSanitizer Tests"; then
+        passed_categories=$((passed_categories + 1))
+    else
+        failed_categories=$((failed_categories + 1))
+    fi
+    
+    # AddressSanitizer
+    total_categories=$((total_categories + 1))
+    if run_sanitizer_tests "asan" "AddressSanitizer Tests"; then
+        passed_categories=$((passed_categories + 1))
+    else
+        failed_categories=$((failed_categories + 1))
+    fi
+fi
+
+# Generate final summary
+generate_summary "${total_categories}" "${passed_categories}" "${failed_categories}"
+
+# Exit with appropriate code
+if [ "${failed_categories}" -eq 0 ]; then
+    exit 0
+else
+    exit 1
+fi

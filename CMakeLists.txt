@@ -171,6 +171,11 @@ if(USE_CUDA)
     target_link_libraries(gpu_acceleration_test PRIVATE ${CUDA_LIBRARIES} ${CUBLAS_LIBRARY} ${CUSOLVER_LIBRARY} ${CUSPARSE_LIBRARY})
 endif()
 
+# Add comprehensive testing framework
+if(BUILD_TESTS)
+    add_subdirectory(tests)
+endif()
+
 # Add the simple GPU test executable
 add_executable(simple_gpu_test examples/simple_gpu_test.cpp)
 target_link_libraries(simple_gpu_test PRIVATE qdsim_static ${EIGEN3_LIBRARIES})
