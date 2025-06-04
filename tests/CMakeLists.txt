@@ -5,8 +5,32 @@ cmake_minimum_required(VERSION 3.18)
 enable_testing()
 
 # Find required packages for testing
-find_package(GTest REQUIRED)
+find_package(GTest QUIET)
 find_package(Threads REQUIRED)
+
+# If GTest is not found, try to build it from source
+if(NOT GTest_FOUND)
+    message(STATUS "GTest not found, attempting to build from source...")
+    include(FetchContent)
+    FetchContent_Declare(
+        googletest
+        URL https://github.com/google/googletest/archive/03597a01ee50ed33e9fd7188ec8e5902e4ec0908.zip
+    )
+    # For Windows: Prevent overriding the parent project's compiler/linker settings
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(googletest)
+
+    # Create aliases to match the find_package targets
+    add_library(GTest::GTest ALIAS gtest)
+    add_library(GTest::Main ALIAS gtest_main)
+    set(GTest_FOUND TRUE)
+endif()
+
+# Only proceed if GTest is available
+if(NOT GTest_FOUND)
+    message(WARNING "GTest not available, skipping test compilation")
+    return()
+endif()
 
 # Include directories
 include_directories(${CMAKE_SOURCE_DIR})
