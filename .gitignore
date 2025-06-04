@@ -108,9 +108,17 @@ CTestTestfile.cmake
 
 # Environment and artifacts
 fresh_env/
+cython_env/
 *.pyc
 *.pyo
 .pytest_cache/
+
+# Cython build artifacts
+*.c
+*.cpp
+*.html
+qdsim_cython/qdsim_cython/
+qdsim_cython/build/
 .coverage
 htmlcov/
 .tox/
