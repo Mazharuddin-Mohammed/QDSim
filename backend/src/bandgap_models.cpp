@@ -11,6 +11,15 @@
 #include "bandgap_models.h"
 #include "physical_constants.h"
 #include <cmath>
+
+// Define coth function if not available
+#ifndef __cpp_lib_math_special_functions
+namespace std {
+    inline double coth(double x) {
+        return cosh(x) / sinh(x);
+    }
+}
+#endif
 #include <algorithm>
 #include <stdexcept>
 #include <iostream>
@@ -29,7 +38,9 @@ double bose_einstein_model(double E_g0, double alpha_B, double theta_B, double t
 
 // O'Donnell-Chen model for temperature-dependent bandgap
 double odonnell_chen_model(double E_g0, double S, double hbar_omega, double temperature) {
-    return E_g0 - S * hbar_omega * (std::coth(hbar_omega / (2.0 * PhysicalConstants::BOLTZMANN_CONSTANT * temperature * PhysicalConstants::J_TO_EV)) - 1.0);
+    double x = hbar_omega / (2.0 * PhysicalConstants::BOLTZMANN_CONSTANT * temperature * PhysicalConstants::J_TO_EV);
+    double coth_x = std::cosh(x) / std::sinh(x);  // coth(x) = cosh(x)/sinh(x)
+    return E_g0 - S * hbar_omega * (coth_x - 1.0);
 }
 
 // Pässler model for temperature-dependent bandgap

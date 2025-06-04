@@ -139,27 +139,21 @@ set(SOURCES
     src/error_estimator.cpp
     src/mesh_quality.cpp
     src/adaptive_refinement.cpp
-    src/memory_efficient.cpp
-    src/parallel_eigensolver.cpp
     src/gpu_accelerator.cpp
     src/spin_orbit.cpp
     src/error_handling.cpp
     src/simple_interpolator.cpp
-    src/diagnostic_manager.cpp
+    src/simple_mesh.cpp
     src/error_visualizer.cpp
-    src/cpu_memory_pool.cpp
-    src/gpu_memory_pool.cpp
-    src/memory_efficient_sparse.cpp
-    src/paged_matrix.cpp
-    src/memory_compression.cpp
-    src/memory_mapped_file.cpp
-    src/memory_mapped_matrix.cpp
-    src/numa_allocator.cpp
-    src/arena_allocator.cpp
     src/carrier_statistics.cpp
     src/mobility_models.cpp
     src/strain_effects.cpp
     src/bandgap_models.cpp
+    src/utils.cpp
+    src/pn_junction.cpp
+    src/schrodinger.cpp
+    src/callback_system.cpp
+    src/full_poisson_dd_solver.cpp
 )
 
 # CUDA source files
@@ -179,8 +173,8 @@ pybind11_add_module(qdsim_cpp src/bindings.cpp ${SOURCES})
 pybind11_add_module(fe_interpolator_module src/fe_interpolator_module.cpp src/mesh.cpp src/fe_interpolator.cpp src/adaptive_mesh_simple.cpp)
 
 # Link libraries
-target_link_libraries(qdsim_cpp PRIVATE ${JSONCPP_LIBRARIES})
-target_link_libraries(fe_interpolator_module PRIVATE ${JSONCPP_LIBRARIES})
+target_link_libraries(qdsim_cpp PRIVATE jsoncpp_lib)
+target_link_libraries(fe_interpolator_module PRIVATE jsoncpp_lib)
 
 # Link compression libraries
 if(LZ4_FOUND)

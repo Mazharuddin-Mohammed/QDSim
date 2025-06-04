@@ -12,6 +12,11 @@
 
 #include <Eigen/Dense>
 
+// Define Matrix6d if not available
+namespace Eigen {
+    using Matrix6d = Matrix<double, 6, 6>;
+}
+
 /**
  * @namespace StrainEffects
  * @brief Namespace for strain effects used in semiconductor simulations.

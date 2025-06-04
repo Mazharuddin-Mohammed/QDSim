@@ -1531,3 +1531,12 @@ void GPUAccelerator::solve_eigenvalue_problem_gpu(
     }
 }
 #endif
+
+// Stub implementation for missing GPU solver functions (outside #ifdef to ensure they're always compiled)
+void GPUAccelerator::solve_eigen_cusolver(const Eigen::MatrixXcd& H_dense,
+                                         const Eigen::MatrixXcd& M_dense,
+                                         int num_eigenvalues,
+                                         std::vector<std::complex<double>>& eigenvalues,
+                                         std::vector<Eigen::VectorXd>& eigenvectors) {
+    throw std::runtime_error("solve_eigen_cusolver not implemented - use CPU fallback");
+}

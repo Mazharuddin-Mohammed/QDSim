@@ -441,7 +441,7 @@ inline void validate_material_parameters(const std::string& material_name, doubl
 } // namespace InputValidation
 
 // Convenience macros for input validation
-#define QDSIM_VALIDATE_RANGE(value, min_value, max_value, parameter_name) \
+#define QDSIM_INPUT_VALIDATE_RANGE(value, min_value, max_value, parameter_name) \
     InputValidation::validate_range(value, min_value, max_value, parameter_name)
 
 #define QDSIM_VALIDATE_POSITIVE(value, parameter_name, allow_zero) \
@@ -459,7 +459,7 @@ inline void validate_material_parameters(const std::string& material_name, doubl
 #define QDSIM_VALIDATE_REGEX(value, regex, parameter_name) \
     InputValidation::validate_regex(value, regex, parameter_name)
 
-#define QDSIM_VALIDATE_FILE_EXISTS(filename, parameter_name) \
+#define QDSIM_INPUT_VALIDATE_FILE_EXISTS(filename, parameter_name) \
     InputValidation::validate_file_exists(filename, parameter_name)
 
 #define QDSIM_VALIDATE_FILE_EXTENSION(filename, extension, parameter_name) \

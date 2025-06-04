@@ -140,6 +140,49 @@ private:
     void assemble_matrices_gpu();
 
     /**
+     * @brief Apply open system boundary conditions for quantum transport.
+     *
+     * Implements absorbing boundary conditions for left/right contacts
+     * and reflecting conditions for top/bottom insulating boundaries.
+     * Uses complex absorbing potentials (CAP) for realistic open system behavior.
+     */
+    void apply_open_system_boundary_conditions();
+
+    /**
+     * @brief Apply conservative boundary conditions for guaranteed convergence.
+     *
+     * Uses very mild CAP parameters to ensure eigenvalue solver stability.
+     */
+    void apply_conservative_boundary_conditions();
+
+    /**
+     * @brief Apply minimal CAP boundaries for guaranteed convergence.
+     *
+     * Uses absolute minimum CAP absorption for eigenvalue solver stability.
+     */
+    void apply_minimal_cap_boundaries();
+
+    /**
+     * @brief Apply Dirac-delta normalization for open quantum systems.
+     *
+     * For scattering states in open systems, we use Dirac-delta normalization:
+     * ⟨ψₖ|ψₖ'⟩ = δ(k - k') rather than the standard L² normalization ∫|ψ|²dV = 1.
+     * This is the correct normalization for plane wave solutions and scattering states.
+     */
+    void apply_dirac_delta_normalization();
+
+    /**
+     * @brief Specialized solver for different device types.
+     *
+     * Optimizes solver parameters based on device geometry and physics:
+     * - Nanowire devices: enhanced current extraction
+     * - Square devices: balanced performance
+     * - Wide devices: gentle absorption
+     * - P-N junction devices: bias-dependent filtering
+     */
+    void configure_device_specific_solver(const std::string& device_type, double bias_voltage = 0.0);
+
+    /**
      * @brief Solves the generalized eigenvalue problem on the CPU.
      *
      * This method solves the generalized eigenvalue problem on the CPU.

@@ -7,13 +7,17 @@
  * including functions for computing effective mass, potential, dielectric constant,
  * charge density, and capacitance.
  *
- * Physical units:
- * - Coordinates: nanometers (nm)
- * - Effective mass: relative to electron mass (m_0)
- * - Potential: electron volts (eV)
- * - Dielectric constant: relative to vacuum permittivity (epsilon_0)
- * - Charge density: elementary charges per cubic nanometer (e/nm^3)
- * - Capacitance: farads per square nanometer (F/nm^2)
+ * Physical units (UPDATED FOR CONSISTENCY):
+ * - Coordinates: meters (m) - SI units for consistency with Schrödinger solver
+ * - Effective mass: kilograms (kg) - SI units (use m* × m₀ where m₀ = 9.109e-31 kg)
+ * - Potential: Joules (J) - SI units (use V_eV × 1.602e-19 for eV to J conversion)
+ * - Dielectric constant: relative to vacuum permittivity (epsilon_0) - dimensionless
+ * - Charge density: Coulombs per cubic meter (C/m³) - SI units
+ * - Capacitance: Farads per square meter (F/m²) - SI units
+ *
+ * IMPORTANT: All functions should use SI units consistently to match the
+ * Schrödinger solver matrix assembly. This ensures energy eigenvalues
+ * are returned in Joules and can be converted to eV by dividing by 1.602e-19.
  *
  * Assumptions and limitations:
  * - The functions assume a 2D simulation domain

@@ -55,267 +55,10 @@
  * reference counting and cleanup of Python callbacks when they are no longer needed.
  * It also provides thread-safe access to the callbacks.
  */
-/**
- * @class CallbackManager
- * @brief Manages Python callbacks used by C++ code.
- *
- * This class provides thread-safe storage and retrieval of Python callback functions.
- * It ensures proper reference counting and cleanup of Python callbacks when they are
- * no longer needed. The class is implemented as a singleton to provide global access.
- */
-class CallbackManager {
-public:
-    /**
-     * @brief Get the singleton instance of the callback manager.
-     *
-     * @return CallbackManager& The singleton instance.
-     */
-    static CallbackManager& getInstance() {
-        static CallbackManager instance;
-        return instance;
-    }
+// Note: CallbackManager and CallbackException are now defined in callback_system.h
+// Using the header definitions instead of duplicating them here
 
-    /**
-     * @brief Set a Python callback function.
-     *
-     * This method stores a Python callback function with the given name.
-     * If a callback with the same name already exists, it is replaced.
-     * The callback is stored as a shared_ptr to ensure proper reference counting.
-     *
-     * @param name The name of the callback.
-     * @param callback The Python callback function.
-     */
-    void setCallback(const std::string& name, const pybind11::function& callback) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        // Acquire GIL before manipulating Python objects
-        pybind11::gil_scoped_acquire gil;
-        callbacks_[name] = std::make_shared<pybind11::function>(callback);
-    }
-
-    /**
-     * @brief Get a Python callback function.
-     *
-     * This method retrieves a Python callback function with the given name.
-     * If no callback with the given name exists, nullptr is returned.
-     *
-     * @param name The name of the callback.
-     * @return std::shared_ptr<pybind11::function> The Python callback function.
-     */
-    std::shared_ptr<pybind11::function> getCallback(const std::string& name) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        auto it = callbacks_.find(name);
-        if (it != callbacks_.end()) {
-            return it->second;
-        }
-        return nullptr;
-    }
-
-    /**
-     * @brief Clear all Python callback functions.
-     *
-     * This method removes all stored callbacks, properly releasing
-     * the Python references.
-     */
-    void clearCallbacks() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        // Acquire GIL before manipulating Python objects
-        pybind11::gil_scoped_acquire gil;
-        callbacks_.clear();
-    }
-
-    /**
-     * @brief Clear a specific Python callback function.
-     *
-     * This method removes a specific callback, properly releasing
-     * the Python reference.
-     *
-     * @param name The name of the callback to clear.
-     */
-    void clearCallback(const std::string& name) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        // Acquire GIL before manipulating Python objects
-        pybind11::gil_scoped_acquire gil;
-        auto it = callbacks_.find(name);
-        if (it != callbacks_.end()) {
-            callbacks_.erase(it);
-        }
-    }
-
-    /**
-     * @brief Check if a callback with the given name exists.
-     *
-     * @param name The name of the callback to check.
-     * @return bool True if the callback exists, false otherwise.
-     */
-    bool hasCallback(const std::string& name) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return callbacks_.find(name) != callbacks_.end();
-    }
-
-private:
-    /**
-     * @brief Private constructor to enforce singleton pattern.
-     */
-    CallbackManager() = default;
-
-    /**
-     * @brief Destructor that ensures proper cleanup of Python references.
-     */
-    ~CallbackManager() {
-        // Acquire GIL before manipulating Python objects
-        pybind11::gil_scoped_acquire gil;
-        callbacks_.clear();
-    }
-
-    // Delete copy constructor and assignment operator
-    CallbackManager(const CallbackManager&) = delete;
-    CallbackManager& operator=(const CallbackManager&) = delete;
-
-    std::mutex mutex_;  ///< Mutex for thread-safe access
-    std::unordered_map<std::string, std::shared_ptr<pybind11::function>> callbacks_;  ///< Map of callback names to functions
-};
-
-/**
- * @brief Convenience function to set a Python callback function.
- *
- * @param name The name of the callback.
- * @param callback The Python callback function.
- */
-void setCallback(const std::string& name, const pybind11::function& callback) {
-    CallbackManager::getInstance().setCallback(name, callback);
-}
-
-/**
- * @brief Convenience function to get a Python callback function.
- *
- * @param name The name of the callback.
- * @return std::shared_ptr<pybind11::function> The Python callback function.
- */
-std::shared_ptr<pybind11::function> getCallback(const std::string& name) {
-    return CallbackManager::getInstance().getCallback(name);
-}
-
-/**
- * @brief Convenience function to clear all Python callback functions.
- */
-void clearCallbacks() {
-    CallbackManager::getInstance().clearCallbacks();
-}
-
-/**
- * @brief Convenience function to clear a specific Python callback function.
- *
- * @param name The name of the callback to clear.
- */
-void clearCallback(const std::string& name) {
-    CallbackManager::getInstance().clearCallback(name);
-}
-
-/**
- * @brief Convenience function to check if a callback with the given name exists.
- *
- * @param name The name of the callback to check.
- * @return bool True if the callback exists, false otherwise.
- */
-bool hasCallback(const std::string& name) {
-    return CallbackManager::getInstance().hasCallback(name);
-}
-
-/**
- * @brief Exception class for callback errors.
- *
- * This class represents an exception that is thrown when a callback error occurs.
- * It provides detailed information about the error, including the callback name,
- * the position where the error occurred, and the error message.
- */
-class CallbackException : public std::runtime_error {
-public:
-    /**
-     * @brief Construct a new Callback Exception object.
-     *
-     * @param callback_name The name of the callback where the error occurred.
-     * @param x The x-coordinate where the error occurred.
-     * @param y The y-coordinate where the error occurred.
-     * @param message The error message.
-     */
-    CallbackException(const std::string& callback_name, double x, double y, const std::string& message)
-        : std::runtime_error(formatMessage(callback_name, x, y, message)),
-          callback_name_(callback_name), x_(x), y_(y), message_(message) {}
-
-    /**
-     * @brief Construct a new Callback Exception object with a simple message.
-     *
-     * @param message The error message.
-     */
-    CallbackException(const std::string& message)
-        : std::runtime_error(message),
-          callback_name_("unknown"), x_(0.0), y_(0.0), message_(message) {}
-
-    /**
-     * @brief Get the name of the callback where the error occurred.
-     *
-     * @return const std::string& The callback name.
-     */
-    const std::string& getCallbackName() const { return callback_name_; }
-
-    /**
-     * @brief Get the x-coordinate where the error occurred.
-     *
-     * @return double The x-coordinate.
-     */
-    double getX() const { return x_; }
-
-    /**
-     * @brief Get the y-coordinate where the error occurred.
-     *
-     * @return double The y-coordinate.
-     */
-    double getY() const { return y_; }
-
-    /**
-     * @brief Get the error message.
-     *
-     * @return const std::string& The error message.
-     */
-    const std::string& getMessage() const { return message_; }
-
-private:
-    /**
-     * @brief Format the error message.
-     *
-     * @param callback_name The name of the callback where the error occurred.
-     * @param x The x-coordinate where the error occurred.
-     * @param y The y-coordinate where the error occurred.
-     * @param message The error message.
-     * @return std::string The formatted error message.
-     */
-    static std::string formatMessage(const std::string& callback_name, double x, double y, const std::string& message) {
-        std::ostringstream oss;
-        oss << "Error in " << callback_name << " callback at position (" << x << ", " << y << "): " << message;
-        return oss.str();
-    }
-
-    std::string callback_name_;
-    double x_;
-    double y_;
-    std::string message_;
-};
-
-/**
- * @brief Log an error message.
- *
- * This function logs an error message to the standard error stream.
- * It includes the callback name, the position where the error occurred,
- * and the error message.
- *
- * @param callback_name The name of the callback where the error occurred.
- * @param x The x-coordinate where the error occurred.
- * @param y The y-coordinate where the error occurred.
- * @param message The error message.
- */
-void logError(const std::string& callback_name, double x, double y, const std::string& message) {
-    std::cerr << "Error in " << callback_name << " callback at position (" << x << ", " << y << "): " << message << std::endl;
-}
+// Note: logError function is now defined in callback_system.cpp to avoid multiple definitions
 
 /**
  * @brief Convert a Python material object to a C++ Material object.
@@ -406,7 +149,7 @@ double epsilon_r_wrapper(double x, double y, const Materials::Material& p_mat = 
 
     try {
         // Get the callback function
-        auto callback = getCallback("epsilon_r");
+        auto callback = CallbackManager::getInstance().getCallback("epsilon_r");
         if (!callback) {
             // No callback registered, use default value
             logError("epsilon_r", x, y, "Python callback not found. Using default value.");
@@ -505,7 +248,7 @@ double rho_wrapper(double x, double y, const Eigen::VectorXd& n, const Eigen::Ve
 
     try {
         // Get the callback function
-        auto callback = getCallback("rho");
+        auto callback = CallbackManager::getInstance().getCallback("rho");
         if (!callback) {
             // No callback registered, use default value
             logError("rho", x, y, "Python callback not found. Using default value.");
@@ -621,7 +364,7 @@ double n_conc_wrapper(double x, double y, double phi, const Materials::Material&
 
     try {
         // Get the callback function
-        auto callback = getCallback("n_conc");
+        auto callback = CallbackManager::getInstance().getCallback("n_conc");
         if (!callback) {
             // No callback registered, use Physics implementation as fallback
             logError("n_conc", x, y, "Python callback not found. Using Physics implementation.");
@@ -726,7 +469,7 @@ double p_conc_wrapper(double x, double y, double phi, const Materials::Material&
 
     try {
         // Get the callback function
-        auto callback = getCallback("p_conc");
+        auto callback = CallbackManager::getInstance().getCallback("p_conc");
         if (!callback) {
             // No callback registered, use Physics implementation as fallback
             logError("p_conc", x, y, "Python callback not found. Using Physics implementation.");
@@ -830,7 +573,7 @@ double mu_n_wrapper(double x, double y, const Materials::Material& mat) {
 
     try {
         // Get the callback function
-        auto callback = getCallback("mu_n");
+        auto callback = CallbackManager::getInstance().getCallback("mu_n");
         if (!callback) {
             // No callback registered, use Physics implementation as fallback
             logError("mu_n", x, y, "Python callback not found. Using Physics implementation.");
@@ -926,7 +669,7 @@ double mu_p_wrapper(double x, double y, const Materials::Material& mat) {
 
     try {
         // Get the callback function
-        auto callback = getCallback("mu_p");
+        auto callback = CallbackManager::getInstance().getCallback("mu_p");
         if (!callback) {
             // No callback registered, use Physics implementation as fallback
             logError("mu_p", x, y, "Python callback not found. Using Physics implementation.");
@@ -1155,8 +898,11 @@ PYBIND11_MODULE(qdsim_cpp, m) {
 
      // SelfConsistentSolver class for self-consistent Poisson-drift-diffusion simulations
      pybind11::class_<SelfConsistentSolver>(m, "SelfConsistentSolver")
-             .def("solve", &SelfConsistentSolver::solve,
-                  pybind11::arg("V_p"), pybind11::arg("V_n"), pybind11::arg("N_A"), pybind11::arg("N_D"),
+             .def("solve", [](SelfConsistentSolver& self, double V_p, double V_n, double N_A, double N_D, double tolerance, int max_iter) {
+                  // Release the GIL during long-running computation
+                  pybind11::gil_scoped_release release;
+                  return self.solve(V_p, V_n, N_A, N_D, tolerance, max_iter);
+              }, pybind11::arg("V_p"), pybind11::arg("V_n"), pybind11::arg("N_A"), pybind11::arg("N_D"),
                   pybind11::arg("tolerance") = 1e-6, pybind11::arg("max_iter") = 100,
                   "Solve the self-consistent Poisson-drift-diffusion equations")
              .def("get_potential", &SelfConsistentSolver::get_potential,
@@ -1284,8 +1030,11 @@ PYBIND11_MODULE(qdsim_cpp, m) {
 
      // SimpleSelfConsistentSolver class for simplified self-consistent Poisson-drift-diffusion simulations
      pybind11::class_<SimpleSelfConsistentSolver>(m, "SimpleSelfConsistentSolver")
-             .def("solve", &SimpleSelfConsistentSolver::solve,
-                  pybind11::arg("V_p"), pybind11::arg("V_n"), pybind11::arg("N_A"), pybind11::arg("N_D"),
+             .def("solve", [](SimpleSelfConsistentSolver& self, double V_p, double V_n, double N_A, double N_D, double tolerance, int max_iter) {
+                  // Release the GIL during long-running computation
+                  pybind11::gil_scoped_release release;
+                  return self.solve(V_p, V_n, N_A, N_D, tolerance, max_iter);
+              }, pybind11::arg("V_p"), pybind11::arg("V_n"), pybind11::arg("N_A"), pybind11::arg("N_D"),
                   pybind11::arg("tolerance") = 1e-6, pybind11::arg("max_iter") = 100,
                   "Solve the self-consistent Poisson-drift-diffusion equations")
              .def("get_potential", &SimpleSelfConsistentSolver::get_potential,
@@ -1312,8 +1061,11 @@ PYBIND11_MODULE(qdsim_cpp, m) {
 
      // ImprovedSelfConsistentSolver class for self-consistent Poisson-drift-diffusion simulations
      pybind11::class_<ImprovedSelfConsistentSolver>(m, "ImprovedSelfConsistentSolver")
-             .def("solve", &ImprovedSelfConsistentSolver::solve,
-                  pybind11::arg("V_p"), pybind11::arg("V_n"), pybind11::arg("N_A"), pybind11::arg("N_D"),
+             .def("solve", [](ImprovedSelfConsistentSolver& self, double V_p, double V_n, double N_A, double N_D, double tolerance, int max_iter) {
+                  // Release the GIL during long-running computation
+                  pybind11::gil_scoped_release release;
+                  return self.solve(V_p, V_n, N_A, N_D, tolerance, max_iter);
+              }, pybind11::arg("V_p"), pybind11::arg("V_n"), pybind11::arg("N_A"), pybind11::arg("N_D"),
                   pybind11::arg("tolerance") = 1e-6, pybind11::arg("max_iter") = 100,
                   "Solve the self-consistent Poisson-drift-diffusion equations")
              .def("get_potential", &ImprovedSelfConsistentSolver::get_potential,
@@ -1330,8 +1082,11 @@ PYBIND11_MODULE(qdsim_cpp, m) {
                   pybind11::arg("mesh"), pybind11::arg("m_star"), pybind11::arg("V"),
                   pybind11::arg("use_gpu") = false,
                   "Construct a new SchrodingerSolver object with the specified mesh, effective mass function, potential function, and GPU flag")
-             .def("solve", &SchrodingerSolver::solve,
-                  pybind11::arg("num_eigenvalues") = 10,
+             .def("solve", [](SchrodingerSolver& self, int num_eigenvalues) {
+                  // Release the GIL during long-running computation
+                  pybind11::gil_scoped_release release;
+                  return self.solve(num_eigenvalues);
+              }, pybind11::arg("num_eigenvalues") = 10,
                   "Solve the Schrödinger equation and compute the specified number of eigenpairs")
              .def("get_eigenvalues", &SchrodingerSolver::get_eigenvalues,
                   "Get the computed eigenvalues")
@@ -1362,36 +1117,36 @@ PYBIND11_MODULE(qdsim_cpp, m) {
          std::string mu_p_key = "mu_p_" + mesh_id;
 
          // Clear any existing callbacks with these keys to prevent memory leaks
-         clearCallback(epsilon_r_key);
-         clearCallback(rho_key);
-         clearCallback(n_conc_key);
-         clearCallback(p_conc_key);
-         clearCallback(mu_n_key);
-         clearCallback(mu_p_key);
+         CallbackManager::getInstance().clearCallback(epsilon_r_key);
+         CallbackManager::getInstance().clearCallback(rho_key);
+         CallbackManager::getInstance().clearCallback(n_conc_key);
+         CallbackManager::getInstance().clearCallback(p_conc_key);
+         CallbackManager::getInstance().clearCallback(mu_n_key);
+         CallbackManager::getInstance().clearCallback(mu_p_key);
 
          // Also clear the global callbacks for backward compatibility
-         clearCallback("epsilon_r");
-         clearCallback("rho");
-         clearCallback("n_conc");
-         clearCallback("p_conc");
-         clearCallback("mu_n");
-         clearCallback("mu_p");
+         CallbackManager::getInstance().clearCallback("epsilon_r");
+         CallbackManager::getInstance().clearCallback("rho");
+         CallbackManager::getInstance().clearCallback("n_conc");
+         CallbackManager::getInstance().clearCallback("p_conc");
+         CallbackManager::getInstance().clearCallback("mu_n");
+         CallbackManager::getInstance().clearCallback("mu_p");
 
          // Store the Python callbacks in the callback manager with mesh-specific keys
-         setCallback(epsilon_r_key, epsilon_r_py);
-         setCallback(rho_key, rho_py);
-         setCallback(n_conc_key, n_conc_py);
-         setCallback(p_conc_key, p_conc_py);
-         setCallback(mu_n_key, mu_n_py);
-         setCallback(mu_p_key, mu_p_py);
+         CallbackManager::getInstance().setCallback(epsilon_r_key, epsilon_r_py);
+         CallbackManager::getInstance().setCallback(rho_key, rho_py);
+         CallbackManager::getInstance().setCallback(n_conc_key, n_conc_py);
+         CallbackManager::getInstance().setCallback(p_conc_key, p_conc_py);
+         CallbackManager::getInstance().setCallback(mu_n_key, mu_n_py);
+         CallbackManager::getInstance().setCallback(mu_p_key, mu_p_py);
 
          // Also store with global keys for backward compatibility
-         setCallback("epsilon_r", epsilon_r_py);
-         setCallback("rho", rho_py);
-         setCallback("n_conc", n_conc_py);
-         setCallback("p_conc", p_conc_py);
-         setCallback("mu_n", mu_n_py);
-         setCallback("mu_p", mu_p_py);
+         CallbackManager::getInstance().setCallback("epsilon_r", epsilon_r_py);
+         CallbackManager::getInstance().setCallback("rho", rho_py);
+         CallbackManager::getInstance().setCallback("n_conc", n_conc_py);
+         CallbackManager::getInstance().setCallback("p_conc", p_conc_py);
+         CallbackManager::getInstance().setCallback("mu_n", mu_n_py);
+         CallbackManager::getInstance().setCallback("mu_p", mu_p_py);
 
          // Create the SelfConsistentSolver with the wrapper functions
          try {
@@ -1402,20 +1157,20 @@ PYBIND11_MODULE(qdsim_cpp, m) {
              return solver.release();
          } catch (const std::exception& e) {
              // Clean up callbacks if solver creation fails
-             clearCallback(epsilon_r_key);
-             clearCallback(rho_key);
-             clearCallback(n_conc_key);
-             clearCallback(p_conc_key);
-             clearCallback(mu_n_key);
-             clearCallback(mu_p_key);
+             CallbackManager::getInstance().clearCallback(epsilon_r_key);
+             CallbackManager::getInstance().clearCallback(rho_key);
+             CallbackManager::getInstance().clearCallback(n_conc_key);
+             CallbackManager::getInstance().clearCallback(p_conc_key);
+             CallbackManager::getInstance().clearCallback(mu_n_key);
+             CallbackManager::getInstance().clearCallback(mu_p_key);
 
              // Also clear the global callbacks
-             clearCallback("epsilon_r");
-             clearCallback("rho");
-             clearCallback("n_conc");
-             clearCallback("p_conc");
-             clearCallback("mu_n");
-             clearCallback("mu_p");
+             CallbackManager::getInstance().clearCallback("epsilon_r");
+             CallbackManager::getInstance().clearCallback("rho");
+             CallbackManager::getInstance().clearCallback("n_conc");
+             CallbackManager::getInstance().clearCallback("p_conc");
+             CallbackManager::getInstance().clearCallback("mu_n");
+             CallbackManager::getInstance().clearCallback("mu_p");
 
              throw;
          }
@@ -1431,20 +1186,20 @@ PYBIND11_MODULE(qdsim_cpp, m) {
          std::string rho_key = "rho_simple_" + mesh_id;
 
          // Clear any existing callbacks with these keys to prevent memory leaks
-         clearCallback(epsilon_r_key);
-         clearCallback(rho_key);
+         CallbackManager::getInstance().clearCallback(epsilon_r_key);
+         CallbackManager::getInstance().clearCallback(rho_key);
 
          // Also clear the global callbacks for backward compatibility
-         clearCallback("epsilon_r");
-         clearCallback("rho");
+         CallbackManager::getInstance().clearCallback("epsilon_r");
+         CallbackManager::getInstance().clearCallback("rho");
 
          // Store the Python callbacks in the callback manager with mesh-specific keys
-         setCallback(epsilon_r_key, epsilon_r_py);
-         setCallback(rho_key, rho_py);
+         CallbackManager::getInstance().setCallback(epsilon_r_key, epsilon_r_py);
+         CallbackManager::getInstance().setCallback(rho_key, rho_py);
 
          // Also store with global keys for backward compatibility
-         setCallback("epsilon_r", epsilon_r_py);
-         setCallback("rho", rho_py);
+         CallbackManager::getInstance().setCallback("epsilon_r", epsilon_r_py);
+         CallbackManager::getInstance().setCallback("rho", rho_py);
 
          // Create the SimpleSelfConsistentSolver with the wrapper functions
          try {
@@ -1455,12 +1210,12 @@ PYBIND11_MODULE(qdsim_cpp, m) {
              return solver.release();
          } catch (const std::exception& e) {
              // Clean up callbacks if solver creation fails
-             clearCallback(epsilon_r_key);
-             clearCallback(rho_key);
+             CallbackManager::getInstance().clearCallback(epsilon_r_key);
+             CallbackManager::getInstance().clearCallback(rho_key);
 
              // Also clear the global callbacks
-             clearCallback("epsilon_r");
-             clearCallback("rho");
+             CallbackManager::getInstance().clearCallback("epsilon_r");
+             CallbackManager::getInstance().clearCallback("rho");
 
              throw;
          }
@@ -1475,20 +1230,20 @@ PYBIND11_MODULE(qdsim_cpp, m) {
          std::string rho_key = "rho_improved_" + mesh_id;
 
          // Clear any existing callbacks with these keys to prevent memory leaks
-         clearCallback(epsilon_r_key);
-         clearCallback(rho_key);
+         CallbackManager::getInstance().clearCallback(epsilon_r_key);
+         CallbackManager::getInstance().clearCallback(rho_key);
 
          // Also clear the global callbacks for backward compatibility
-         clearCallback("epsilon_r");
-         clearCallback("rho");
+         CallbackManager::getInstance().clearCallback("epsilon_r");
+         CallbackManager::getInstance().clearCallback("rho");
 
          // Store the Python callbacks in the callback manager with mesh-specific keys
-         setCallback(epsilon_r_key, epsilon_r_py);
-         setCallback(rho_key, rho_py);
+         CallbackManager::getInstance().setCallback(epsilon_r_key, epsilon_r_py);
+         CallbackManager::getInstance().setCallback(rho_key, rho_py);
 
          // Also store with global keys for backward compatibility
-         setCallback("epsilon_r", epsilon_r_py);
-         setCallback("rho", rho_py);
+         CallbackManager::getInstance().setCallback("epsilon_r", epsilon_r_py);
+         CallbackManager::getInstance().setCallback("rho", rho_py);
 
          // Create the ImprovedSelfConsistentSolver with the wrapper functions
          try {
@@ -1499,12 +1254,12 @@ PYBIND11_MODULE(qdsim_cpp, m) {
              return solver.release();
          } catch (const std::exception& e) {
              // Clean up callbacks if solver creation fails
-             clearCallback(epsilon_r_key);
-             clearCallback(rho_key);
+             CallbackManager::getInstance().clearCallback(epsilon_r_key);
+             CallbackManager::getInstance().clearCallback(rho_key);
 
              // Also clear the global callbacks
-             clearCallback("epsilon_r");
-             clearCallback("rho");
+             CallbackManager::getInstance().clearCallback("epsilon_r");
+             CallbackManager::getInstance().clearCallback("rho");
 
              throw;
          }
@@ -1518,12 +1273,12 @@ PYBIND11_MODULE(qdsim_cpp, m) {
          std::string V_key = "V_" + std::to_string(reinterpret_cast<uintptr_t>(&mesh));
 
          // Clear any existing callbacks with these keys to prevent memory leaks
-         clearCallback(m_star_key);
-         clearCallback(V_key);
+         CallbackManager::getInstance().clearCallback(m_star_key);
+         CallbackManager::getInstance().clearCallback(V_key);
 
          // Store the Python callbacks in the callback manager
-         setCallback(m_star_key, m_star_py);
-         setCallback(V_key, V_py);
+         CallbackManager::getInstance().setCallback(m_star_key, m_star_py);
+         CallbackManager::getInstance().setCallback(V_key, V_py);
 
          // Create wrapper functions for the effective mass callback
          auto m_star_wrapper = [m_star_key](double x, double y) -> double {
@@ -1532,7 +1287,7 @@ PYBIND11_MODULE(qdsim_cpp, m) {
 
              try {
                  // Get the callback function
-                 auto callback = getCallback(m_star_key);
+                 auto callback = CallbackManager::getInstance().getCallback(m_star_key);
                  if (!callback) {
                      throw std::runtime_error("m_star callback not found");
                  }
@@ -1582,7 +1337,7 @@ PYBIND11_MODULE(qdsim_cpp, m) {
 
              try {
                  // Get the callback function
-                 auto callback = getCallback(V_key);
+                 auto callback = CallbackManager::getInstance().getCallback(V_key);
                  if (!callback) {
                      throw std::runtime_error("V callback not found");
                  }
@@ -1634,8 +1389,8 @@ PYBIND11_MODULE(qdsim_cpp, m) {
              return solver.release();
          } catch (const std::exception& e) {
              // Clean up callbacks if solver creation fails
-             clearCallback(m_star_key);
-             clearCallback(V_key);
+             CallbackManager::getInstance().clearCallback(m_star_key);
+             CallbackManager::getInstance().clearCallback(V_key);
              throw;
          }
      }, pybind11::arg("mesh"), pybind11::arg("m_star"), pybind11::arg("V"), pybind11::arg("use_gpu") = false,
@@ -1643,14 +1398,31 @@ PYBIND11_MODULE(qdsim_cpp, m) {
 
      // Helper function to clear all callbacks
      m.def("clear_callbacks", []() {
-         clearCallbacks();
+         try {
+             CallbackManager::getInstance().clearCallbacks();
+         } catch (...) {
+             // Ignore errors during callback cleanup to prevent crashes
+         }
      }, "Clear all Python callbacks to avoid memory leaks");
 
      // Helper function to clear a specific callback
      m.def("clear_callback", [](const std::string& name) {
-         clearCallback(name);
+         try {
+             CallbackManager::getInstance().clearCallback(name);
+         } catch (...) {
+             // Ignore errors during callback cleanup to prevent crashes
+         }
      }, pybind11::arg("name"),
         "Clear a specific Python callback to avoid memory leaks");
+
+     // Add the clearCallbacks function for compatibility
+     m.def("clearCallbacks", []() {
+         try {
+             CallbackManager::getInstance().clearCallbacks();
+         } catch (...) {
+             // Ignore errors during callback cleanup to prevent crashes
+         }
+     }, "Clear all Python callbacks (compatibility function)");
 
      // Register the CallbackException class
      pybind11::register_exception<CallbackException>(m, "CallbackException");
@@ -1810,9 +1582,8 @@ PYBIND11_MODULE(qdsim_cpp, m) {
 #ifdef USE_MPI
         AdaptiveMesh::refineMesh(mesh, refine_flags, MPI_COMM_WORLD);
 #else
-        // Create a dummy MPI_Comm for non-MPI builds
-        MPI_Comm dummy_comm = MPI_COMM_WORLD;
-        AdaptiveMesh::refineMesh(mesh, refine_flags, dummy_comm);
+        // For non-MPI builds, use the overload without MPI_Comm
+        AdaptiveMesh::refineMesh(mesh, refine_flags);
 #endif
     };
 
@@ -1882,9 +1653,14 @@ PYBIND11_MODULE(qdsim_cpp, m) {
     m.def("setCallback", &setCallback,
           pybind11::arg("name"), pybind11::arg("callback"),
           "Set a Python callback function");
-    m.def("getCallback", &getCallback,
-          pybind11::arg("name"),
-          "Get a Python callback function");
+    m.def("getCallback", [](const std::string& name) -> pybind11::object {
+        auto callback = getCallback(name);
+        if (callback) {
+            return pybind11::object(*callback);
+        }
+        return pybind11::none();
+    }, pybind11::arg("name"),
+       "Get a Python callback function");
     m.def("clearCallbacks", &clearCallbacks,
           "Clear all Python callback functions");
     m.def("clearCallback", &clearCallback,

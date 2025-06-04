@@ -67,9 +67,24 @@ std::shared_ptr<pybind11::function> CallbackManager::getCallback(const std::stri
  */
 void CallbackManager::clearCallbacks() {
     std::lock_guard<std::mutex> lock(mutex_);
-    // Acquire GIL before manipulating Python objects
-    pybind11::gil_scoped_acquire gil;
-    callbacks_.clear();
+    // Only acquire GIL if Python interpreter is still running
+    try {
+        if (Py_IsInitialized()) {
+            // Acquire GIL before manipulating Python objects
+            pybind11::gil_scoped_acquire gil;
+            callbacks_.clear();
+        } else {
+            // Python interpreter is shutting down, just clear without GIL
+            callbacks_.clear();
+        }
+    } catch (...) {
+        // If anything goes wrong, just clear the map
+        try {
+            callbacks_.clear();
+        } catch (...) {
+            // Ignore any errors during cleanup
+        }
+    }
 }
 
 /**
@@ -82,11 +97,32 @@ void CallbackManager::clearCallbacks() {
  */
 void CallbackManager::clearCallback(const std::string& name) {
     std::lock_guard<std::mutex> lock(mutex_);
-    // Acquire GIL before manipulating Python objects
-    pybind11::gil_scoped_acquire gil;
-    auto it = callbacks_.find(name);
-    if (it != callbacks_.end()) {
-        callbacks_.erase(it);
+    // Only acquire GIL if Python interpreter is still running
+    try {
+        if (Py_IsInitialized()) {
+            // Acquire GIL before manipulating Python objects
+            pybind11::gil_scoped_acquire gil;
+            auto it = callbacks_.find(name);
+            if (it != callbacks_.end()) {
+                callbacks_.erase(it);
+            }
+        } else {
+            // Python interpreter is shutting down, just clear without GIL
+            auto it = callbacks_.find(name);
+            if (it != callbacks_.end()) {
+                callbacks_.erase(it);
+            }
+        }
+    } catch (...) {
+        // If anything goes wrong, try to clear without GIL
+        try {
+            auto it = callbacks_.find(name);
+            if (it != callbacks_.end()) {
+                callbacks_.erase(it);
+            }
+        } catch (...) {
+            // Ignore any errors during cleanup
+        }
     }
 }
 
@@ -105,9 +141,26 @@ bool CallbackManager::hasCallback(const std::string& name) {
  * @brief Destructor that ensures proper cleanup of Python references.
  */
 CallbackManager::~CallbackManager() {
-    // Acquire GIL before manipulating Python objects
-    pybind11::gil_scoped_acquire gil;
-    callbacks_.clear();
+    // Only try to acquire GIL if Python interpreter is still running
+    try {
+        if (Py_IsInitialized()) {
+            // Acquire GIL before manipulating Python objects
+            pybind11::gil_scoped_acquire gil;
+            callbacks_.clear();
+        } else {
+            // Python interpreter is shutting down, just clear the map without GIL
+            // The Python objects will be cleaned up by the interpreter
+            callbacks_.clear();
+        }
+    } catch (...) {
+        // If anything goes wrong during cleanup, just clear the map
+        // This prevents crashes during interpreter shutdown
+        try {
+            callbacks_.clear();
+        } catch (...) {
+            // Ignore any errors during final cleanup
+        }
+    }
 }
 
 /**
