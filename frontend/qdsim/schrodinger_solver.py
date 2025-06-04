@@ -127,10 +127,26 @@ class SchrodingerSolver:
                     Ni = 1.0 / 3.0
                     Nj = 1.0 / 3.0
 
-                    # Calculate Hamiltonian matrix element
-                    hbar = 6.582119569e-16  # eV·s
+                    # Calculate Hamiltonian matrix element with proper SI units
+                    # Physical constants in SI units
+                    hbar = 1.054571817e-34  # J·s (SI units)
+
+                    # Ensure consistent units:
+                    # - m should be in kg (SI mass)
+                    # - V_val should be in Joules (SI energy)
+                    # - coordinates in meters (SI length)
+                    # - area in m² (SI area)
+
+                    # Kinetic energy term: ℏ²/(2m) ∇ψ·∇φ (integration by parts)
+                    # For finite elements: ∫ ℏ²/(2m) ∇Ni·∇Nj dΩ
+                    # Units: [J·s]² / [kg] * [1/m] * [1/m] * [m²] = [J·m²]
                     kinetic_term = (hbar * hbar / (2.0 * m)) * (dNi_dx * dNj_dx + dNi_dy * dNj_dy) * area
+
+                    # Potential energy term: ∫ V·Ni·Nj dΩ
+                    # Units: [J] * [dimensionless] * [dimensionless] * [m²] = [J·m²]
                     potential_term = V_val * Ni * Nj * area
+
+                    # Total Hamiltonian element
                     H_ij = kinetic_term + potential_term
 
                     # Calculate mass matrix element
@@ -140,9 +156,60 @@ class SchrodingerSolver:
                     self.H[ni, nj] += H_ij
                     self.M[ni, nj] += M_ij
 
+        # Apply Dirichlet boundary conditions: ψ = 0 at domain boundaries
+        # This is CRITICAL for quantum confinement and positive eigenvalues
+        self._apply_boundary_conditions()
+
         # Convert to CSR format for efficient computation
         self.H = self.H.tocsr()
         self.M = self.M.tocsr()
+
+    def _apply_boundary_conditions(self):
+        """
+        Apply Dirichlet boundary conditions for quantum confinement.
+
+        This method applies ψ = 0 boundary conditions at the domain boundaries,
+        which is essential for quantum confinement. This ensures:
+        1. Positive eigenvalues (bound states)
+        2. Correct energy scale
+        3. Physical wavefunctions that vanish at boundaries
+        """
+        nodes = self.mesh.get_nodes()
+        num_nodes = len(nodes)
+
+        # Get domain boundaries
+        x_coords = [node[0] for node in nodes]
+        y_coords = [node[1] for node in nodes]
+        x_min, x_max = min(x_coords), max(x_coords)
+        y_min, y_max = min(y_coords), max(y_coords)
+
+        # Tolerance for boundary detection
+        tol = 1e-10
+
+        # Apply Dirichlet boundary conditions: ψ = 0 at boundaries
+        for i in range(num_nodes):
+            x, y = nodes[i][0], nodes[i][1]
+
+            # Check if node is on boundary
+            is_boundary = (abs(x - x_min) < tol or  # Left boundary
+                          abs(x - x_max) < tol or  # Right boundary
+                          abs(y - y_min) < tol or  # Bottom boundary
+                          abs(y - y_max) < tol)   # Top boundary
+
+            if is_boundary:
+                # Zero out the i-th row and column in H matrix
+                self.H[i, :] = 0
+                self.H[:, i] = 0
+
+                # Zero out the i-th row and column in M matrix
+                self.M[i, :] = 0
+                self.M[:, i] = 0
+
+                # Set diagonal entries: H[i,i] = large_value, M[i,i] = 1
+                # This enforces ψ_i = 0 (eigenvalue will be large_value)
+                large_value = 1e12  # Large energy to push boundary modes to high energy
+                self.H[i, i] = large_value
+                self.M[i, i] = 1.0
 
     def solve(self, num_eigenvalues=10):
         """

@@ -1,9 +1,24 @@
 import numpy as np
-import matplotlib.pyplot as plt
 from .config import Config
 from .fe_interpolator import FEInterpolator
 from .adaptive_mesh import AdaptiveMesh
 from .callback_wrapper import CallbackWrapper
+
+# Optional matplotlib import for visualization
+try:
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as patches
+    from matplotlib.patches import Polygon
+    from matplotlib.collections import PatchCollection
+    MATPLOTLIB_AVAILABLE = True
+    print("✅ Matplotlib available for visualization")
+except ImportError:
+    print("⚠️  Matplotlib not available - visualization features disabled")
+    MATPLOTLIB_AVAILABLE = False
+    plt = None
+    patches = None
+    Polygon = None
+    PatchCollection = None
 
 # Import the C++ extension
 import sys
@@ -14,19 +29,24 @@ try:
     from . import qdsim_cpp
 
     if qdsim_cpp is None:
-        print("Warning: Could not import C++ extension. Make sure it's built and in the Python path.", file=sys.stderr)
-        # Try to import from the build directory
-        build_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'build')
-        if os.path.exists(build_dir):
-            sys.path.append(build_dir)
+        print("Warning: qdsim_cpp is None. Trying direct import...", file=sys.stderr)
+        # Try to import from the backend build directory
+        backend_build_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'backend', 'build')
+        if os.path.exists(backend_build_dir) and backend_build_dir not in sys.path:
+            sys.path.insert(0, backend_build_dir)
             try:
                 import qdsim_cpp
-                print(f"Successfully imported qdsim_cpp from {build_dir}")
+                print(f"✅ Successfully imported qdsim_cpp from {backend_build_dir}")
             except ImportError as e:
-                print(f"Warning: Could not import qdsim_cpp from {build_dir}: {e}")
+                print(f"❌ Could not import qdsim_cpp from {backend_build_dir}: {e}")
+                qdsim_cpp = None
+    else:
+        print("✅ qdsim_cpp already available from package import")
+
 except ImportError as e:
-    print(f"Warning: Error importing C++ extension: {e}", file=sys.stderr)
-    print("Using Python fallback implementations where available.")
+    print(f"❌ Error importing C++ extension: {e}", file=sys.stderr)
+    print("🔄 Using Python fallback implementations where available.")
+    qdsim_cpp = None
 
 class Simulator:
     def __init__(self, config: Config):
