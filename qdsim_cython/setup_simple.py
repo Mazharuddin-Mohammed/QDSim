@@ -97,6 +97,18 @@ extensions = [
         extra_link_args=extra_link_args,
         language="c++",
     ),
+
+    # Add mesh module
+    Extension(
+        "qdsim_cython.core.mesh_minimal",
+        ["core/mesh_minimal.pyx"],
+        include_dirs=include_dirs,
+        library_dirs=library_dirs,
+        libraries=libraries,
+        extra_compile_args=extra_compile_args,
+        extra_link_args=extra_link_args,
+        language="c++",
+    ),
 ]
 
 # Add analysis module with fixed dependencies
