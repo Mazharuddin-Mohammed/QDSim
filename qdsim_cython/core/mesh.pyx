@@ -12,14 +12,8 @@ import numpy as np
 cimport numpy as cnp
 from libcpp.vector cimport vector
 from libcpp.string cimport string
-from libcpp cimport bool
-from libcpp.array cimport array
-
 # Import C++ declarations
-from .mesh cimport Mesh as CppMesh
-from .mesh cimport AdaptiveMesh as CppAdaptiveMesh
-from .mesh cimport SimpleMesh as CppSimpleMesh
-from ..eigen cimport Vector2d, VectorXd
+from .mesh cimport CppMesh
 
 # Initialize NumPy
 cnp.import_array()
@@ -45,13 +39,19 @@ cdef class Mesh:
         Element order (1=P1, 2=P2, 3=P3), default=1
     """
     
-    cdef CppMesh* _mesh
-    cdef bool _owns_mesh
-    
+    cdef CppMesh _mesh
+
     def __cinit__(self, double Lx, double Ly, int nx, int ny, int element_order=1):
         """Initialize the mesh with given parameters."""
-        self._mesh = new CppMesh(Lx, Ly, nx, ny, element_order)
-        self._owns_mesh = True
+        self._mesh.Lx = Lx
+        self._mesh.Ly = Ly
+        self._mesh.nx = nx
+        self._mesh.ny = ny
+        self._mesh.element_order = element_order
+
+        # Calculate number of nodes and elements
+        self._mesh.num_nodes = (nx + 1) * (ny + 1)
+        self._mesh.num_elements = nx * ny
         
     def __dealloc__(self):
         """Clean up the C++ mesh object."""
@@ -297,4 +297,4 @@ def compute_refinement_flags(Mesh mesh, solution, double threshold):
     for i in range(num_flags):
         flags_array[i] = 1 if cpp_flags[i] else 0
         
-    return flags_array.astype(bool)
+    return flags_array.astype(np.bool_)

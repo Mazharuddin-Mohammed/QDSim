@@ -39,19 +39,23 @@ cdef double epsilon_r_callback(double x, double y) with gil:
 
 cdef double rho_callback(double x, double y, const VectorXd& n, const VectorXd& p) with gil:
     """C callback for charge density function."""
+    # Declare variables at function level
+    cdef cnp.ndarray[double, ndim=1] n_array
+    cdef cnp.ndarray[double, ndim=1] p_array
+    cdef int i
+
     try:
         # Get the current callback function
         if 0 in _rho_callbacks:
             # Convert C++ vectors to NumPy arrays
-            cdef cnp.ndarray[double, ndim=1] n_array = np.empty(n.size(), dtype=np.float64)
-            cdef cnp.ndarray[double, ndim=1] p_array = np.empty(p.size(), dtype=np.float64)
-            
-            cdef int i
+            n_array = np.empty(n.size(), dtype=np.float64)
+            p_array = np.empty(p.size(), dtype=np.float64)
+
             for i in range(n.size()):
                 n_array[i] = n[i]
             for i in range(p.size()):
                 p_array[i] = p[i]
-                
+
             return _rho_callbacks[0](x, y, n_array, p_array)
         else:
             return 0.0  # Default charge density

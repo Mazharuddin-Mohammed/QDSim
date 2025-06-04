@@ -11,40 +11,17 @@ that will be wrapped by Cython.
 from libcpp.vector cimport vector
 from libcpp.string cimport string
 from libcpp cimport bool
-from libcpp.array cimport array
-from ..eigen cimport Vector2d, VectorXd, SparseMatrixXd
 
-# Forward declarations
-cdef extern from "mesh.h":
-    cdef cppclass Mesh:
-        # Constructors
-        Mesh(double Lx, double Ly, int nx, int ny, int element_order) except +
-        
-        # Node and element access
-        const vector[Vector2d]& getNodes() const
-        const vector[array[int, 3]]& getElements() const
-        const vector[array[int, 6]]& getQuadraticElements() const
-        const vector[array[int, 10]]& getCubicElements() const
-        
-        # Mesh properties
-        int getNumNodes() const
-        int getNumElements() const
-        int getElementOrder() const
-        double get_lx() const
-        double get_ly() const
-        int get_nx() const
-        int get_ny() const
-        
-        # Mesh refinement
-        void refine(const vector[bool]& refine_flags) except +
-        bool refine(const vector[int]& element_indices, int max_refinement_level) except +
-        
-        # I/O operations
-        void save(const string& filename) const except +
-        
-        # Static methods
-        @staticmethod
-        Mesh load(const string& filename) except +
+# Simplified mesh struct for Cython compilation
+cdef struct CppMesh:
+    # Basic properties
+    double Lx                    # Domain length in x
+    double Ly                    # Domain length in y
+    int nx                       # Number of elements in x
+    int ny                       # Number of elements in y
+    int element_order            # Element order (1, 2, 3)
+    int num_nodes               # Total number of nodes
+    int num_elements            # Total number of elements
 
 cdef extern from "adaptive_mesh.h":
     cdef cppclass AdaptiveMesh:
