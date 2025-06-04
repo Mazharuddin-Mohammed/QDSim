@@ -70,11 +70,26 @@ cdef class Material:
         return (f"Material(m_e={self.m_e:.3f}, m_h={self.m_h:.3f}, "
                 f"E_g={self.E_g:.3f} eV, epsilon_r={self.epsilon_r:.1f})")
 
-def create_material(name="GaAs"):
+def create_material(name="GaAs", bandgap=1.424, eff_mass=0.067, dielectric=12.9):
     """
-    Create a Material with default properties.
+    Create a Material with specified properties.
+
+    Parameters:
+    -----------
+    name : str
+        Material name
+    bandgap : float
+        Bandgap in eV
+    eff_mass : float
+        Effective mass in units of m0
+    dielectric : float
+        Relative dielectric constant
     """
-    return Material()
+    material = Material()
+    material.E_g = bandgap
+    material.m_e = eff_mass
+    material.epsilon_r = dielectric
+    return material
 
 def test_basic_functionality():
     """

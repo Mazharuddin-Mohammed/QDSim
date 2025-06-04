@@ -8,7 +8,8 @@ This file provides Cython declarations for commonly used Eigen types
 in the QDSim project.
 """
 
-from libcpp cimport bool
+from libcpp cimport bool as bint
+from libcpp.complex cimport complex
 
 cdef extern from "Eigen/Dense" namespace "Eigen":
     # Vector types
@@ -42,7 +43,17 @@ cdef extern from "Eigen/Dense" namespace "Eigen":
         void resize(int size)
         double norm() const
         VectorXd normalized() const
-        
+
+    cdef cppclass VectorXcd:
+        VectorXcd() except +
+        VectorXcd(int size) except +
+        complex[double]& operator[](int index)
+        const complex[double]& operator[](int index) const
+        int size() const
+        void resize(int size)
+        double norm() const
+        VectorXcd normalized() const
+
     # Matrix types
     cdef cppclass Matrix2d:
         Matrix2d() except +
@@ -59,6 +70,15 @@ cdef extern from "Eigen/Dense" namespace "Eigen":
         MatrixXd(int rows, int cols) except +
         double& operator()(int row, int col)
         const double& operator()(int row, int col) const
+        int rows() const
+        int cols() const
+        void resize(int rows, int cols)
+
+    cdef cppclass MatrixXcd:
+        MatrixXcd() except +
+        MatrixXcd(int rows, int cols) except +
+        complex[double]& operator()(int row, int col)
+        const complex[double]& operator()(int row, int col) const
         int rows() const
         int cols() const
         void resize(int rows, int cols)
@@ -80,3 +100,4 @@ cdef extern from "Eigen/Sparse" namespace "Eigen":
     # Commonly used sparse matrix types
     ctypedef SparseMatrix[double] SparseMatrixXd
     ctypedef SparseMatrix[float] SparseMatrixXf
+    ctypedef SparseMatrix[complex[double]] SparseMatrixXcd

@@ -19,9 +19,10 @@ cimport numpy as cnp
 from libcpp.vector cimport vector
 from libcpp.string cimport string
 from libcpp cimport bool as bint
-from ..eigen cimport VectorXd, VectorXcd
-from ..core.mesh cimport Mesh
-from ..core.interpolator cimport FEInterpolator
+# Simplified imports to avoid dependency issues
+# from ..eigen cimport VectorXd, VectorXcd
+# from ..core.mesh cimport Mesh
+# from ..core.interpolator cimport FEInterpolator
 
 # Initialize NumPy
 cnp.import_array()
@@ -45,17 +46,17 @@ cdef class QuantumStateAnalyzer:
     cdef object _mesh_ref
     cdef object _interpolator
     
-    def __cinit__(self, Mesh mesh):
+    def __cinit__(self, mesh=None):
         """
         Initialize quantum state analyzer.
-        
+
         Parameters:
         -----------
-        mesh : Mesh
+        mesh : object, optional
             Finite element mesh for the quantum system
         """
         self._mesh_ref = mesh
-        self._interpolator = FEInterpolator(mesh)
+        # self._interpolator = FEInterpolator(mesh)  # Disabled for now
     
     def analyze_wavefunction(self, psi, energy=None):
         """
