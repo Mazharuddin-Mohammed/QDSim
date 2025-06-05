@@ -1,0 +1,43 @@
+# Include documentation files
+include README.md
+include CONTRIBUTING.md
+include LICENSE
+include CHANGELOG.md
+
+# Include documentation source
+recursive-include docs *.rst *.md *.py *.txt *.yml *.yaml
+recursive-include docs/source *.rst *.md *.py
+recursive-include docs/source/_static *.css *.js *.png *.jpg *.svg
+recursive-include docs/source/_templates *.html
+
+# Include Cython source files
+recursive-include qdsim_cython *.pyx *.pxd *.h *.cpp *.c
+
+# Include configuration files
+include .readthedocs.yaml
+include setup.py
+include pyproject.toml
+
+# Include test files
+recursive-include tests *.py
+
+# Include example files
+recursive-include examples *.py *.ipynb *.md
+
+# Include working examples
+include working_*.py
+include validate_*.py
+
+# Exclude build artifacts
+global-exclude *.pyc
+global-exclude *.pyo
+global-exclude *.so
+global-exclude __pycache__
+global-exclude .git*
+global-exclude .DS_Store
+global-exclude *.egg-info
+
+# Exclude temporary files
+global-exclude *~
+global-exclude *.tmp
+global-exclude *.bak
