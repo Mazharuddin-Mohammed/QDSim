@@ -1,6 +1,6 @@
 # QDSim - Advanced Quantum Dot Simulator
 
-[![Documentation Status](https://readthedocs.org/projects/qdsim/badge/?version=latest)](https://qdsim.readthedocs.io/en/latest/?badge=latest)
+[![Documentation Status](https://readthedocs.org/projects/qdsimx/badge/?version=latest)](https://qdsimx.readthedocs.io/en/latest/?badge=latest)
 [![Build Status](https://github.com/qdsim/qdsim/workflows/CI/badge.svg)](https://github.com/qdsim/qdsim/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
@@ -137,19 +137,19 @@ plotter.plot_comprehensive_analysis(
 
 ## 📚 Documentation
 
-Comprehensive documentation is available at **[qdsim.readthedocs.io](https://qdsim.readthedocs.io)**
+Comprehensive documentation is available at **[qdsimx.readthedocs.io](https://qdsimx.readthedocs.io)**
 
 ### Documentation Sections
-- **[Installation Guide](https://qdsim.readthedocs.io/en/latest/installation.html)**: Complete setup instructions for all platforms
-- **[Quick Start](https://qdsim.readthedocs.io/en/latest/quickstart.html)**: Get running in minutes with working examples
-- **[Theory Guide](https://qdsim.readthedocs.io/en/latest/theory/)**: Quantum mechanics formulation and numerical methods
-- **[Cython Migration](https://qdsim.readthedocs.io/en/latest/enhancements/cython_migration.html)**: Performance optimization through Cython backend
-- **[Memory Management](https://qdsim.readthedocs.io/en/latest/enhancements/memory_management.html)**: Advanced memory optimization techniques
-- **[GPU Acceleration](https://qdsim.readthedocs.io/en/latest/enhancements/gpu_acceleration.html)**: CUDA-based parallel computing
-- **[Open Systems](https://qdsim.readthedocs.io/en/latest/enhancements/open_systems.html)**: Complex eigenvalue theory and implementation
-- **[User Guide](https://qdsim.readthedocs.io/en/latest/user_guide/)**: Step-by-step tutorials and examples
-- **[API Reference](https://qdsim.readthedocs.io/en/latest/api/)**: Complete function and class documentation
-- **[Developer Guide](https://qdsim.readthedocs.io/en/latest/developer/)**: Contributing and extending QDSim
+- **[Installation Guide](https://qdsimx.readthedocs.io/en/latest/installation.html)**: Complete setup instructions for all platforms
+- **[Quick Start](https://qdsimx.readthedocs.io/en/latest/quickstart.html)**: Get running in minutes with working examples
+- **[Theory Guide](https://qdsimx.readthedocs.io/en/latest/theory/)**: Quantum mechanics formulation and numerical methods
+- **[Cython Migration](https://qdsimx.readthedocs.io/en/latest/enhancements/cython_migration.html)**: Performance optimization through Cython backend
+- **[Memory Management](https://qdsimx.readthedocs.io/en/latest/enhancements/memory_management.html)**: Advanced memory optimization techniques
+- **[GPU Acceleration](https://qdsimx.readthedocs.io/en/latest/enhancements/gpu_acceleration.html)**: CUDA-based parallel computing
+- **[Open Systems](https://qdsimx.readthedocs.io/en/latest/enhancements/open_systems.html)**: Complex eigenvalue theory and implementation
+- **[User Guide](https://qdsimx.readthedocs.io/en/latest/user_guide/)**: Step-by-step tutorials and examples
+- **[API Reference](https://qdsimx.readthedocs.io/en/latest/api/)**: Complete function and class documentation
+- **[Developer Guide](https://qdsimx.readthedocs.io/en/latest/developer/)**: Contributing and extending QDSim
 
 ## 🔬 Scientific Background
 
@@ -160,16 +160,16 @@ QDSim implements state-of-the-art quantum mechanical simulations based on:
 - **Open System Theory**: Complex eigenvalue problems for finite lifetimes
 - **Self-Consistent Field Theory**: Coupled Poisson-Schrödinger equations
 
-For detailed theoretical background, see our [Theory Documentation](https://qdsim.readthedocs.io/en/latest/theory/).
+For detailed theoretical background, see our [Theory Documentation](https://qdsimx.readthedocs.io/en/latest/theory/).
 
 ## 🚀 Recent Enhancements
 
 QDSim has undergone major enhancements documented in chronological order:
 
-1. **[Cython Migration](https://qdsim.readthedocs.io/en/latest/enhancements/cython_migration.html)** - Complete backend migration to Cython for C-level performance
-2. **[Memory Management](https://qdsim.readthedocs.io/en/latest/enhancements/memory_management.html)** - Advanced memory optimization and RAII-based resource management
-3. **[GPU Acceleration](https://qdsim.readthedocs.io/en/latest/enhancements/gpu_acceleration.html)** - CUDA-based parallel computing with automatic fallback
-4. **[Open System Implementation](https://qdsim.readthedocs.io/en/latest/enhancements/open_systems.html)** - Complex eigenvalue theory and finite lifetime physics
+1. **[Cython Migration](https://qdsimx.readthedocs.io/en/latest/enhancements/cython_migration.html)** - Complete backend migration to Cython for C-level performance
+2. **[Memory Management](https://qdsimx.readthedocs.io/en/latest/enhancements/memory_management.html)** - Advanced memory optimization and RAII-based resource management
+3. **[GPU Acceleration](https://qdsimx.readthedocs.io/en/latest/enhancements/gpu_acceleration.html)** - CUDA-based parallel computing with automatic fallback
+4. **[Open System Implementation](https://qdsimx.readthedocs.io/en/latest/enhancements/open_systems.html)** - Complex eigenvalue theory and finite lifetime physics
 
 Each enhancement includes theoretical formulation, implementation details, and validation results.
 
@@ -194,10 +194,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📞 Support
 
-- **Documentation**: [qdsim.readthedocs.io](https://qdsim.readthedocs.io)
+- **Documentation**: [qdsimx.readthedocs.io](https://qdsimx.readthedocs.io)
 - **Issues**: [GitHub Issues](https://github.com/your-username/QDSim/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/your-username/QDSim/discussions)
-- **Email**: qdsim-support@example.com
+- **Email**: mazharuddin.mohammed.official@gmail.com
 
 ---
 

@@ -15,10 +15,10 @@ description = "Advanced Quantum Dot Simulator with Open System Support"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
-    {name = "Dr. Mazharuddin Mohammed", email = "mazhar@example.com"}
+    {name = "Dr. Mazharuddin Mohammed", email = "mazharuddin.mohammed.official@gmail.com"}
 ]
 maintainers = [
-    {name = "Dr. Mazharuddin Mohammed", email = "mazhar@example.com"}
+    {name = "Dr. Mazharuddin Mohammed", email = "mazharuddin.mohammed.official@gmail.com"}
 ]
 keywords = [
     "quantum mechanics",
@@ -82,7 +82,7 @@ all = [
 
 [project.urls]
 Homepage = "https://github.com/your-username/QDSim"
-Documentation = "https://qdsim.readthedocs.io"
+Documentation = "https://qdsimx.readthedocs.io"
 Repository = "https://github.com/your-username/QDSim.git"
 "Bug Tracker" = "https://github.com/your-username/QDSim/issues"
 Changelog = "https://github.com/your-username/QDSim/blob/main/CHANGELOG.md"
