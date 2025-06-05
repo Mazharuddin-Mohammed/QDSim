@@ -1,0 +1,27 @@
+# Documentation build requirements for Read the Docs
+
+# Build system dependencies
+setuptools>=45
+wheel
+setuptools-scm
+
+# Scientific computing (for autodoc and examples)
+numpy>=1.21.0
+scipy>=1.7.0
+matplotlib>=3.5.0
+
+# Sphinx and extensions
+sphinx>=5.0.0
+sphinx-rtd-theme>=1.2.0
+sphinx-copybutton>=0.5.0
+sphinx-tabs>=3.4.0
+myst-parser>=0.18.0
+nbsphinx>=0.8.0
+sphinx-autodoc-typehints>=1.19.0
+sphinx-gallery>=0.11.0
+
+# Additional documentation tools
+recommonmark>=0.7.0
+
+# Optional: Cython for full build (commented out for docs-only build)
+# cython>=0.29.0
