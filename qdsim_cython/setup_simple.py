@@ -126,6 +126,30 @@ if eigen_found:
         )
     )
 
+# Add all Cython-based solver modules
+solver_modules = [
+    "qdsim_cython.solvers.poisson_solver",
+    "qdsim_cython.solvers.schrodinger_solver",
+    "qdsim_cython.solvers.fem_solver",
+    "qdsim_cython.solvers.eigen_solver",
+    "qdsim_cython.solvers.self_consistent_solver"
+]
+
+for module_name in solver_modules:
+    pyx_file = module_name.replace("qdsim_cython.", "").replace(".", "/") + ".pyx"
+    extensions.append(
+        Extension(
+            module_name,
+            [pyx_file],
+            include_dirs=include_dirs,
+            library_dirs=library_dirs,
+            libraries=libraries,
+            extra_compile_args=extra_compile_args,
+            extra_link_args=extra_link_args,
+            language="c++",
+        )
+    )
+
 # Simplified compiler directives
 compiler_directives = {
     'language_level': 3,
