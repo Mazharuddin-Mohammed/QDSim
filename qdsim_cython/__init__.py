@@ -13,6 +13,10 @@ Modules:
 
 __version__ = "2.0.0"
 __author__ = "Dr. Mazharuddin Mohammed"
+__email__ = "mazhar@example.com"
+__license__ = "MIT"
+__url__ = "https://github.com/your-username/QDSim"
+__docs__ = "https://qdsim.readthedocs.io"
 
 # Import core modules
 try:

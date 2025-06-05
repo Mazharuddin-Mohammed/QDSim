@@ -18,7 +18,6 @@ from libc.stdlib cimport malloc, free, realloc
 from libc.string cimport memcpy, memset
 import threading
 import time
-import weakref
 from typing import Dict, List, Optional, Any
 
 # Initialize NumPy
@@ -154,8 +153,7 @@ cdef class MemoryPool:
             
             if self.free_blocks:
                 block = self.free_blocks.pop()
-                block.tag = tag
-                block.allocation_time = time.time()
+                # Note: tag is set during creation, not modified here
                 self.allocated_blocks.append(block)
                 self.allocation_count += 1
                 self.reuse_count += 1
@@ -218,7 +216,7 @@ cdef class AdvancedMemoryManager:
     cdef bint auto_gc_enabled
     cdef bint leak_detection_enabled
     cdef object lock
-    cdef object weak_refs
+    cdef list tracked_blocks
     cdef double last_gc_time
     
     def __cinit__(self):
@@ -230,7 +228,7 @@ cdef class AdvancedMemoryManager:
         self.auto_gc_enabled = True
         self.leak_detection_enabled = True
         self.lock = threading.RLock()
-        self.weak_refs = weakref.WeakSet()
+        self.tracked_blocks = []
         self.last_gc_time = time.time()
     
     def allocate_block(self, size_t size, str tag="", AllocationStrategy strategy=AllocationStrategy.CPU_ONLY):
@@ -265,9 +263,9 @@ cdef class AdvancedMemoryManager:
             if self.total_allocated > self.peak_usage:
                 self.peak_usage = self.total_allocated
             
-            # Add to weak reference tracking
+            # Add to tracking list
             if self.leak_detection_enabled:
-                self.weak_refs.add(block)
+                self.tracked_blocks.append(block_id)
             
             return block
     

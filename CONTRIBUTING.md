@@ -1,442 +1,316 @@
 # Contributing to QDSim
 
-Thank you for your interest in contributing to QDSim! This document outlines the process and guidelines for contributing to this project.
+Thank you for your interest in contributing to QDSim! This guide will help you get started with contributing to our advanced quantum dot simulator.
 
-## Table of Contents
-1. [Code of Conduct](#code-of-conduct)
-2. [Getting Started](#getting-started)
-3. [Development Workflow](#development-workflow)
-4. [Coding Standards](#coding-standards)
-5. [Documentation Guidelines](#documentation-guidelines)
-6. [Testing Guidelines](#testing-guidelines)
-7. [Pull Request Process](#pull-request-process)
-8. [Attribution](#attribution)
+## 🚀 Quick Start for Contributors
 
-## Code of Conduct
-
-By participating in this project, you agree to abide by our Code of Conduct. Please read and follow it to ensure a positive and respectful environment for all contributors.
-
-- Be respectful and inclusive
-- Be patient and welcoming
-- Be considerate
-- Be collaborative
-- Be careful in the words you choose
-- When we disagree, try to understand why
-
-## Getting Started
-
-### Prerequisites
-- C++17-compatible compiler (e.g., GCC 7+, Clang 5+)
-- CMake 3.10+
-- MPI (e.g., OpenMPI, MPICH)
-- Eigen3 (linear algebra library)
-- Spectra (eigenvalue solver)
-- Catch2 (testing framework)
-- Python 3.8+
-- Pybind11, NumPy, Matplotlib, PySide6, pytest
-
-### Setting Up Development Environment
-
-1. Fork the repository on GitHub
-2. Clone your fork locally:
-   ```bash
-   git clone https://github.com/YOUR-USERNAME/QDSim.git
-   cd QDSim
-   ```
-3. Add the original repository as an upstream remote:
-   ```bash
-   git remote add upstream https://github.com/Mazharuddin-Mohammed/QDSim.git
-   ```
-4. Create a build directory and build the project:
-   ```bash
-   mkdir -p build
-   cd build
-   cmake ..
-   make -j4
-   ```
-5. Install the Python package in development mode:
-   ```bash
-   cd ..
-   pip install -e .
-   ```
-
-## Development Workflow
-
-1. Create a new branch for your feature or bugfix:
-   ```bash
-   git checkout -b feature/your-feature-name
-   ```
-   or
-   ```bash
-   git checkout -b fix/your-bugfix-name
-   ```
-
-2. Make your changes, following the coding standards and guidelines below.
-
-3. Run tests to ensure your changes don't break existing functionality:
-   ```bash
-   cd build
-   ctest
-   cd ../frontend
-   pytest
-   ```
-
-4. Commit your changes with clear, descriptive commit messages:
-   ```bash
-   git commit -m "Add feature: description of your feature"
-   ```
-
-5. Push your branch to your fork:
-   ```bash
-   git push origin feature/your-feature-name
-   ```
-
-6. Create a pull request from your branch to the main repository.
-
-## Coding Standards
-
-### C++ Code Style
-
-- Follow the Google C++ Style Guide with the following exceptions:
-  - Use 4 spaces for indentation, not tabs
-  - Line length limit is 100 characters
-  - Use camelCase for method names, not snake_case
-  - Use snake_case for variable names
-
-- Always include proper header guards:
-  ```cpp
-  #ifndef QDSIM_MODULE_HEADER_H_
-  #define QDSIM_MODULE_HEADER_H_
-
-  // Code here
-
-  #endif  // QDSIM_MODULE_HEADER_H_
-  ```
-
-- Use forward declarations when possible to minimize include dependencies
-- Use const-correctness throughout the codebase
-- Use smart pointers (std::unique_ptr, std::shared_ptr) instead of raw pointers
-- Use C++17 features when appropriate (e.g., std::optional, structured bindings)
-- Avoid using exceptions for control flow; use them only for exceptional conditions
-
-### Python Code Style
-
-- Follow PEP 8 style guide
-- Use 4 spaces for indentation, not tabs
-- Line length limit is 88 characters (compatible with Black formatter)
-- Use snake_case for function and variable names
-- Use CamelCase for class names
-- Use docstrings for all public functions, classes, and methods
-- Type hints are encouraged for function parameters and return values
-
-### General Guidelines
-
-- Write self-documenting code with clear variable and function names
-- Keep functions small and focused on a single task
-- Avoid global variables
-- Minimize code duplication; use functions or classes to encapsulate repeated logic
-- Use meaningful comments to explain why, not what
-- Always add proper author attribution to Dr. Mazharuddin Mohammed in file headers
-
-## Documentation Guidelines
-
-### Code Documentation
-
-- All public APIs must be documented
-- Use Doxygen-style comments for C++ code:
-  ```cpp
-  /**
-   * @brief Brief description of the function
-   *
-   * Detailed description of the function, including any important notes
-   * or implementation details.
-   *
-   * @param param1 Description of first parameter
-   * @param param2 Description of second parameter
-   * @return Description of return value
-   * @throws Description of exceptions that might be thrown
-   */
-  ```
-
-- Use Google-style docstrings for Python code:
-  ```python
-  def function_name(param1, param2):
-      """Brief description of the function.
-
-      Detailed description of the function, including any important notes
-      or implementation details.
-
-      Args:
-          param1: Description of first parameter
-          param2: Description of second parameter
-
-      Returns:
-          Description of return value
-
-      Raises:
-          ExceptionType: Description of when this exception is raised
-      """
-  ```
-
-### README and Other Documentation
-
-- Keep the README.md up-to-date with the current state of the project
-- Document all major features and components
-- Include examples and usage instructions
-- Use proper Markdown formatting for headings, code blocks, and lists
-- Use LaTeX for mathematical equations (GitHub-flavored Markdown supports this)
-
-## Testing Guidelines
-
-QDSim requires comprehensive testing to ensure correctness, reliability, and physical accuracy. The test suite is organized into several categories:
-
-### Unit Tests
-
-Unit tests verify that individual components work correctly in isolation:
-
-- Use Catch2 for C++ unit tests
-- Use pytest for Python unit tests
-- Aim for at least 90% code coverage
-- Test both normal and edge cases
-- Use descriptive test names that explain what is being tested
-- Organize C++ tests in a logical hierarchy using TEST_CASE and SECTION
-- Use pytest fixtures for setup and teardown in Python tests
-- Use parametrized tests for testing multiple inputs
-- Mock external dependencies when necessary
-
-Example C++ unit test:
-```cpp
-TEST_CASE("Mesh refinement", "[mesh]") {
-    // Arrange
-    Mesh mesh(10, 10);
-    std::vector<bool> refinement_flags(mesh.getNumElements(), false);
-    refinement_flags[0] = true;
-
-    // Act
-    int new_elements = mesh.refine(refinement_flags);
-
-    // Assert
-    REQUIRE(new_elements > 0);
-    REQUIRE(mesh.getNumElements() > 10);
-
-    SECTION("Refinement preserves mesh quality") {
-        // Additional tests for mesh quality
-        REQUIRE(mesh.getMinQuality() > 0.1);
-    }
-}
-```
-
-Example Python unit test:
-```python
-@pytest.fixture
-def mesh():
-    """Create a test mesh."""
-    return Mesh(10, 10)
-
-def test_refine_creates_new_elements(mesh):
-    # Arrange
-    refinement_flags = [False] * mesh.get_num_elements()
-    refinement_flags[0] = True
-
-    # Act
-    new_elements = mesh.refine(refinement_flags)
-
-    # Assert
-    assert new_elements > 0
-    assert mesh.get_num_elements() > 10
-```
-
-### Integration Tests
-
-Integration tests verify that multiple components work correctly together:
-
-- Test interactions between components
-- Use real dependencies where possible
-- Verify end-to-end workflows
-- Test error handling and edge cases
-- Include tests for MPI and GPU acceleration
-
-Example integration test:
-```cpp
-TEST_CASE("FEM solver with adaptive mesh refinement", "[integration]") {
-    // Arrange
-    Simulator simulator;
-    simulator.setDomain(-10.0, 10.0, -10.0, 10.0);
-    simulator.setMeshSize(20, 20);
-    simulator.setPotential(PotentialType::HARMONIC);
-    simulator.setAdaptiveMeshRefinement(true);
-
-    // Act
-    auto result = simulator.run(5);
-
-    // Assert
-    REQUIRE(result.eigenvalues.size() == 5);
-    REQUIRE(simulator.getMesh().getNumElements() > 400);  // Mesh should be refined
-
-    // Check eigenvalues against analytical solution for harmonic oscillator
-    REQUIRE(result.eigenvalues[0] == Approx(1.0).epsilon(0.05));
-    REQUIRE(result.eigenvalues[1] == Approx(2.0).epsilon(0.05));
-    REQUIRE(result.eigenvalues[2] == Approx(2.0).epsilon(0.05));
-}
-```
-
-### Validation Tests
-
-Validation tests verify that the simulation results match expected physical behavior:
-
-- Compare simulation results with analytical solutions
-- Verify physical accuracy
-- Test edge cases and boundary conditions
-- Include tests for different material parameters
-- Validate against experimental data when available
-
-Example validation test:
-```cpp
-TEST_CASE("Harmonic oscillator eigenvalues", "[validation]") {
-    // Arrange
-    Simulator simulator;
-    simulator.setPotential(PotentialType::HARMONIC);
-    simulator.setDomain(-10.0, 10.0, -10.0, 10.0);
-    simulator.setMeshSize(100, 100);
-
-    // Act
-    auto result = simulator.run(10);
-
-    // Assert
-    // For a 2D harmonic oscillator, eigenvalues should be E_n,m = (n + m + 1) * hbar * omega
-    double hbar_omega = 1.0;  // Assuming normalized units
-    REQUIRE(result.eigenvalues[0] == Approx(1.0 * hbar_omega).epsilon(0.01));
-    REQUIRE(result.eigenvalues[1] == Approx(2.0 * hbar_omega).epsilon(0.01));
-    REQUIRE(result.eigenvalues[2] == Approx(2.0 * hbar_omega).epsilon(0.01));
-    REQUIRE(result.eigenvalues[3] == Approx(3.0 * hbar_omega).epsilon(0.01));
-}
-```
-
-### Performance Tests
-
-Performance tests verify that the code meets performance requirements:
-
-- Measure execution time
-- Measure memory usage
-- Compare against baseline performance
-- Test scalability with problem size
-- Test parallel performance with different numbers of processes/threads
-- Test GPU acceleration
-
-Example performance test:
-```cpp
-TEST_CASE("Mesh refinement performance", "[performance]") {
-    // Arrange
-    Mesh mesh = generateLargeMesh();
-    std::vector<bool> refinement_flags(mesh.getNumElements(), false);
-    for (int i = 0; i < refinement_flags.size(); i += 10) {
-        refinement_flags[i] = true;
-    }
-
-    // Act
-    auto start = std::chrono::high_resolution_clock::now();
-    mesh.refine(refinement_flags);
-    auto end = std::chrono::high_resolution_clock::now();
-
-    // Assert
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-    REQUIRE(duration.count() < 1000);  // Should complete in less than 1 second
-}
-```
-
-### Test Coverage
-
-To generate test coverage reports:
+### 1. Development Environment Setup
 
 ```bash
-# C++ test coverage
-cd build
-cmake -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON ..
-make
-make test
-make coverage
+# Fork and clone the repository
+git clone https://github.com/your-username/QDSim.git
+cd QDSim
 
-# Python test coverage
-cd frontend
-pytest --cov=qdsim tests/
+# Create development environment
+python3 -m venv qdsim_dev_env
+source qdsim_dev_env/bin/activate
+
+# Install development dependencies
+pip install -e .[dev]
+
+# Install system dependencies
+sudo apt-get install python3-dev python3-matplotlib python3-numpy python3-scipy
 ```
 
-Aim for at least 90% code coverage for critical components and at least 80% overall.
+### 2. Build and Test
 
-### Continuous Integration
+```bash
+# Build Cython extensions
+python setup.py build_ext --inplace
 
-QDSim uses GitHub Actions for continuous integration. The CI pipeline runs all tests on every push and pull request, ensuring that the code remains reliable and correct. The CI configuration is located in the `.github/workflows` directory.
+# Run tests
+python -m pytest tests/ -v
 
-When adding new features or fixing bugs, make sure to add appropriate tests to verify the changes.
+# Run working examples
+python working_integration_test.py
+```
 
-## Pull Request Process
+## 🎯 Types of Contributions
 
-1. Ensure your code follows the coding standards and passes all tests
-2. Update the documentation, including the README.md if necessary
-3. Add or update tests as appropriate
-4. Make sure your branch is up-to-date with the main branch:
-   ```bash
-   git fetch upstream
-   git rebase upstream/master
-   ```
-5. Create a pull request with a clear title and description
-6. Address any feedback from code reviews
-7. Once approved, your pull request will be merged by a maintainer
+### **High Priority Areas**
+- **Open System Physics**: Complex eigenvalue implementations
+- **Visualization**: Advanced plotting and analysis tools
+- **Performance**: GPU acceleration and memory optimization
+- **Documentation**: Theory guides and tutorials
 
-### Pull Request Template
+### **Code Contributions**
+- Bug fixes and performance improvements
+- New quantum physics features
+- Enhanced visualization capabilities
+- Better error handling and validation
 
-When creating a pull request, please use the following template:
+### **Documentation Contributions**
+- Theory explanations and derivations
+- Tutorial examples and use cases
+- API documentation improvements
+- Scientific background materials
 
+### **Testing Contributions**
+- Unit tests for new features
+- Integration tests for complex workflows
+- Performance benchmarks
+- Cross-platform validation
+
+## 🔬 Scientific Standards
+
+### **Physics Accuracy**
+- All quantum mechanical implementations must be physically correct
+- Include references to scientific literature
+- Validate against analytical solutions where possible
+- Document assumptions and approximations
+
+### **Numerical Methods**
+- Use stable and well-tested algorithms
+- Include error analysis and convergence studies
+- Document numerical parameters and their effects
+- Provide performance benchmarks
+
+## 💻 Development Guidelines
+
+### **Code Style**
+
+#### Python Code
+```python
+# Follow PEP 8 with these specifics:
+# - 4 spaces for indentation
+# - Line length: 88 characters (Black formatter)
+# - Type hints for all public functions
+# - Comprehensive docstrings
+
+def solve_schrodinger_equation(
+    hamiltonian: np.ndarray,
+    num_states: int = 5,
+    solver_type: str = "arpack"
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Solve the time-independent Schrödinger equation.
+    
+    Args:
+        hamiltonian: Complex Hamiltonian matrix
+        num_states: Number of eigenvalues to compute
+        solver_type: Eigenvalue solver algorithm
+        
+    Returns:
+        Tuple of (eigenvalues, eigenvectors)
+        
+    Raises:
+        ValueError: If hamiltonian is not square matrix
+    """
+    pass
+```
+
+#### Cython Code
+```cython
+# Use .pyx extension for Cython files
+# Include proper memory management
+# Add type declarations for performance
+
+cdef class QuantumSolver:
+    cdef:
+        double complex[:, :] hamiltonian
+        int num_states
+        
+    def __init__(self, hamiltonian, num_states=5):
+        self.hamiltonian = hamiltonian
+        self.num_states = num_states
+```
+
+### **Testing Requirements**
+
+#### Unit Tests
+```python
+import pytest
+import numpy as np
+from qdsim.solvers import FixedOpenSystemSolver
+
+def test_complex_eigenvalues():
+    """Test that open system produces complex eigenvalues."""
+    # Setup
+    solver = create_test_solver()
+    
+    # Execute
+    eigenvals, _ = solver.solve(3)
+    
+    # Verify
+    assert len(eigenvals) == 3
+    assert any(np.imag(E) != 0 for E in eigenvals)
+    
+    # Check physical constraints
+    for E in eigenvals:
+        assert np.real(E) < 0  # Bound states
+        assert np.imag(E) <= 0  # Finite lifetimes
+```
+
+#### Integration Tests
+```python
+def test_full_quantum_simulation():
+    """Test complete quantum simulation workflow."""
+    # Test realistic quantum dot simulation
+    # Verify complex eigenvalues with finite lifetimes
+    # Check visualization output
+    # Validate against known results
+```
+
+### **Documentation Standards**
+
+#### Theory Documentation
+- Include mathematical derivations
+- Reference scientific literature
+- Explain physical assumptions
+- Provide validation examples
+
+#### API Documentation
+```python
+class WavefunctionPlotter:
+    """
+    Advanced visualization for quantum wavefunctions.
+    
+    This class provides comprehensive plotting capabilities for quantum
+    mechanical systems, including energy level diagrams, 2D/3D wavefunction
+    plots, and device structure visualization.
+    
+    Examples:
+        >>> plotter = WavefunctionPlotter()
+        >>> plotter.plot_energy_levels(eigenvals, "Energy Levels")
+        >>> plotter.plot_wavefunction_2d(x, y, psi, "Ground State")
+    
+    References:
+        [1] Griffiths, D. J. (2018). Introduction to Quantum Mechanics.
+        [2] Tannor, D. J. (2007). Introduction to Quantum Mechanics.
+    """
+```
+
+## 🧪 Testing Your Contributions
+
+### **Required Tests**
+1. **Unit Tests**: Test individual functions and classes
+2. **Integration Tests**: Test complete workflows
+3. **Physics Validation**: Compare with analytical solutions
+4. **Performance Tests**: Ensure no significant regressions
+
+### **Running the Test Suite**
+```bash
+# Run all tests
+python -m pytest tests/ -v
+
+# Run specific test categories
+python -m pytest tests/unit/ -v
+python -m pytest tests/integration/ -v
+python -m pytest tests/physics/ -v
+
+# Run with coverage
+python -m pytest tests/ --cov=qdsim --cov-report=html
+```
+
+### **Validation Examples**
+```bash
+# Test complex eigenvalue implementation
+python working_complex_eigenvalue_example.py
+
+# Test visualization system
+python working_integration_test.py
+
+# Test specific solvers
+python validate_actual_solvers_working.py
+```
+
+## 📝 Pull Request Process
+
+### **Before Submitting**
+1. ✅ All tests pass
+2. ✅ Code follows style guidelines
+3. ✅ Documentation is updated
+4. ✅ Physics validation completed
+5. ✅ Performance impact assessed
+
+### **Pull Request Template**
 ```markdown
 ## Description
-[Provide a brief description of the changes in this pull request]
-
-## Related Issue
-[Reference any related issue(s) using #issue_number]
+Brief description of changes and motivation.
 
 ## Type of Change
 - [ ] Bug fix
 - [ ] New feature
-- [ ] Breaking change
-- [ ] Documentation update
 - [ ] Performance improvement
-- [ ] Code cleanup or refactoring
+- [ ] Documentation update
+- [ ] Breaking change
 
-## How Has This Been Tested?
-[Describe the tests that you ran to verify your changes]
+## Physics Validation
+- [ ] Compared with analytical solutions
+- [ ] Validated against literature
+- [ ] Tested edge cases
 
-## Checklist
-- [ ] My code follows the coding standards of this project
-- [ ] I have added tests that prove my fix is effective or that my feature works
-- [ ] I have updated the documentation accordingly
-- [ ] I have added proper author attribution to Dr. Mazharuddin Mohammed
-- [ ] I have checked that my changes don't break existing functionality
+## Testing
+- [ ] Unit tests added/updated
+- [ ] Integration tests pass
+- [ ] Performance benchmarks run
+
+## Documentation
+- [ ] API documentation updated
+- [ ] Theory documentation added
+- [ ] Examples provided
 ```
 
-## Attribution
+## 🐛 Reporting Issues
 
-All contributions to QDSim must include proper attribution to Dr. Mazharuddin Mohammed as the original author. This should be included in the file header comments as follows:
+### **Bug Reports**
+Include:
+- Clear description of the problem
+- Minimal reproducible example
+- Expected vs. actual behavior
+- System information (OS, Python version, dependencies)
+- Error messages and stack traces
 
-For C++ files:
-```cpp
-/**
- * @file filename.h
- * @brief Brief description of the file
- * @author Dr. Mazharuddin Mohammed
- * @author Your Name (if you've made significant changes)
- */
-```
+### **Feature Requests**
+Include:
+- Scientific motivation
+- Proposed implementation approach
+- References to relevant literature
+- Potential impact on existing code
 
-For Python files:
-```python
-"""
-Brief description of the file
+## 📚 Documentation Contributions
 
-Author: Dr. Mazharuddin Mohammed
-Contributors: Your Name (if you've made significant changes)
-"""
-```
+### **Theory Documentation**
+- Mathematical derivations with proper notation
+- Physical explanations and intuition
+- References to scientific literature
+- Validation against known results
+
+### **Tutorial Examples**
+- Step-by-step explanations
+- Complete working code
+- Physical interpretation of results
+- Common pitfalls and solutions
+
+## 🏆 Recognition
+
+Contributors will be acknowledged in:
+- README.md contributors section
+- Documentation acknowledgments
+- Release notes for significant contributions
+- Academic publications (for major scientific contributions)
+
+## 📞 Getting Help
+
+- **GitHub Discussions**: For questions and design discussions
+- **GitHub Issues**: For bug reports and feature requests
+- **Documentation**: [qdsim.readthedocs.io](https://qdsim.readthedocs.io)
+- **Email**: qdsim-dev@example.com
+
+## 📄 License
+
+By contributing to QDSim, you agree that your contributions will be licensed under the MIT License.
 
 ---
 
-Thank you for contributing to QDSim! Your efforts help make this project better for everyone.
+**Thank you for contributing to QDSim and advancing open-source quantum simulation!**

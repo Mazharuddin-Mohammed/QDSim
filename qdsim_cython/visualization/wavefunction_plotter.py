@@ -7,17 +7,21 @@ wavefunctions, probability densities, and device structures.
 """
 
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')  # Non-interactive backend
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.patches import Rectangle
 from mpl_toolkits.mplot3d import Axes3D
-import seaborn as sns
 from typing import Tuple, List, Optional, Dict, Any
 import time
 
-# Set up plotting style
-plt.style.use('seaborn-v0_8')
-sns.set_palette("husl")
+# Set up plotting style - simplified
+try:
+    plt.style.use('default')
+    print("✅ Matplotlib style set")
+except:
+    pass
 
 class WavefunctionPlotter:
     """
@@ -53,17 +57,30 @@ class WavefunctionPlotter:
         y_unique = np.sort(np.unique(nodes_y))
         X, Y = np.meshgrid(x_unique, y_unique)
         
-        # Interpolate wavefunction onto grid
-        from scipy.interpolate import griddata
-        
-        # Real part
+        # Simple grid mapping without scipy interpolation
+        # Map wavefunction to grid using nearest neighbor approach
         psi_real = np.real(wavefunction)
-        Z_real = griddata((nodes_x, nodes_y), psi_real, (X, Y), method='cubic', fill_value=0)
+        Z_real = np.zeros_like(X)
+
+        # Simple mapping for structured grids
+        for i, x_val in enumerate(x_unique):
+            for j, y_val in enumerate(y_unique):
+                # Find closest node
+                distances = (nodes_x - x_val)**2 + (nodes_y - y_val)**2
+                closest_idx = np.argmin(distances)
+                Z_real[j, i] = psi_real[closest_idx]
         
         # Imaginary part (if complex)
         if np.any(np.imag(wavefunction) != 0):
             psi_imag = np.imag(wavefunction)
-            Z_imag = griddata((nodes_x, nodes_y), psi_imag, (X, Y), method='cubic', fill_value=0)
+            Z_imag = np.zeros_like(X)
+
+            # Simple mapping for imaginary part
+            for i, x_val in enumerate(x_unique):
+                for j, y_val in enumerate(y_unique):
+                    distances = (nodes_x - x_val)**2 + (nodes_y - y_val)**2
+                    closest_idx = np.argmin(distances)
+                    Z_imag[j, i] = psi_imag[closest_idx]
             
             # Create subplot for complex wavefunction
             fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5), dpi=self.dpi)
@@ -135,17 +152,26 @@ class WavefunctionPlotter:
         y_unique = np.sort(np.unique(nodes_y))
         X, Y = np.meshgrid(x_unique, y_unique)
         
-        # Interpolate wavefunction
-        from scipy.interpolate import griddata
-        
+        # Simple grid mapping without scipy interpolation
         if np.any(np.imag(wavefunction) != 0):
             # Complex wavefunction - plot probability density
             psi_prob = np.abs(wavefunction)**2
-            Z = griddata((nodes_x, nodes_y), psi_prob, (X, Y), method='cubic', fill_value=0)
+            Z = np.zeros_like(X)
+            for i, x_val in enumerate(x_unique):
+                for j, y_val in enumerate(y_unique):
+                    distances = (nodes_x - x_val)**2 + (nodes_y - y_val)**2
+                    closest_idx = np.argmin(distances)
+                    Z[j, i] = psi_prob[closest_idx]
             title_suffix = " - Probability Density"
         else:
             # Real wavefunction
-            Z = griddata((nodes_x, nodes_y), np.real(wavefunction), (X, Y), method='cubic', fill_value=0)
+            psi_real = np.real(wavefunction)
+            Z = np.zeros_like(X)
+            for i, x_val in enumerate(x_unique):
+                for j, y_val in enumerate(y_unique):
+                    distances = (nodes_x - x_val)**2 + (nodes_y - y_val)**2
+                    closest_idx = np.argmin(distances)
+                    Z[j, i] = psi_real[closest_idx]
             title_suffix = ""
         
         # Create 3D plot
@@ -382,13 +408,23 @@ class WavefunctionPlotter:
         y_unique = np.sort(np.unique(nodes_y))
         X, Y = np.meshgrid(x_unique, y_unique)
         
-        from scipy.interpolate import griddata
-        
+        # Simple grid mapping without scipy interpolation
         if np.any(np.imag(wavefunction) != 0):
             psi_prob = np.abs(wavefunction)**2
-            Z = griddata((nodes_x, nodes_y), psi_prob, (X, Y), method='cubic', fill_value=0)
+            Z = np.zeros_like(X)
+            for i, x_val in enumerate(x_unique):
+                for j, y_val in enumerate(y_unique):
+                    distances = (nodes_x - x_val)**2 + (nodes_y - y_val)**2
+                    closest_idx = np.argmin(distances)
+                    Z[j, i] = psi_prob[closest_idx]
         else:
-            Z = griddata((nodes_x, nodes_y), np.real(wavefunction), (X, Y), method='cubic', fill_value=0)
+            psi_real = np.real(wavefunction)
+            Z = np.zeros_like(X)
+            for i, x_val in enumerate(x_unique):
+                for j, y_val in enumerate(y_unique):
+                    distances = (nodes_x - x_val)**2 + (nodes_y - y_val)**2
+                    closest_idx = np.argmin(distances)
+                    Z[j, i] = psi_real[closest_idx]
         
         im = ax.contourf(X*1e9, Y*1e9, Z, levels=20, cmap='viridis')
         ax.set_title(title)

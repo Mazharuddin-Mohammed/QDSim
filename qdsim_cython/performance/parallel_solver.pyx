@@ -23,8 +23,13 @@ from typing import Tuple, Dict, List, Optional
 # Initialize NumPy
 cnp.import_array()
 
-# OpenMP support
-cimport openmp
+# OpenMP support (conditional)
+try:
+    cimport openmp
+    OPENMP_AVAILABLE = True
+except ImportError:
+    OPENMP_AVAILABLE = False
+
 from libc.stdlib cimport malloc, free
 
 # Performance optimization flags

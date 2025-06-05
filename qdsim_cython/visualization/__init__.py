@@ -11,26 +11,8 @@ This module provides Cython-accelerated visualization capabilities for:
 - Interactive 3D plotting
 """
 
-from .quantum_plots import *
-from .device_plots import *
-from .interactive_plots import *
+from .wavefunction_plotter import WavefunctionPlotter
 
 __all__ = [
-    # Quantum visualization
-    'QuantumPlotter',
     'WavefunctionPlotter',
-    'EnergyBandPlotter',
-    'ProbabilityDensityPlotter',
-    
-    # Device visualization
-    'DevicePlotter',
-    'MaterialPlotter',
-    'PotentialPlotter',
-    'CurrentDensityPlotter',
-    
-    # Interactive visualization
-    'InteractivePlotter',
-    'Animation3D',
-    'ParameterSweepPlotter',
-    'RealTimePlotter',
 ]
