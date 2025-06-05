@@ -7,9 +7,17 @@ and comprehensive open quantum system support.
 """
 
 from setuptools import setup, find_packages, Extension
-from Cython.Build import cythonize
-import numpy
 import os
+
+# Try to import Cython, but make it optional for documentation builds
+try:
+    from Cython.Build import cythonize
+    import numpy
+    CYTHON_AVAILABLE = True
+except ImportError:
+    CYTHON_AVAILABLE = False
+    cythonize = None
+    numpy = None
 
 # Read version from __init__.py
 def get_version():
@@ -30,31 +38,33 @@ def get_long_description():
             return f.read()
     return "Advanced Quantum Dot Simulator"
 
-# Define Cython extensions
-extensions = [
-    Extension(
-        "qdsim_cython.solvers.fixed_open_system_solver",
-        ["qdsim_cython/solvers/fixed_open_system_solver.pyx"],
-        include_dirs=[numpy.get_include()],
-        extra_compile_args=["-O3", "-ffast-math", "-march=native"],
-        extra_link_args=["-O3"],
-        language="c++"
-    ),
-    Extension(
-        "qdsim_cython.memory.advanced_memory_manager",
-        ["qdsim_cython/memory/advanced_memory_manager.pyx"],
-        include_dirs=[numpy.get_include()],
-        extra_compile_args=["-O3", "-ffast-math"],
-        language="c++"
-    ),
-    Extension(
-        "qdsim_cython.materials",
-        ["qdsim_cython/materials.pyx"],
-        include_dirs=[numpy.get_include()],
-        extra_compile_args=["-O3"],
-        language="c++"
-    )
-]
+# Define Cython extensions (only if Cython is available)
+extensions = []
+if CYTHON_AVAILABLE:
+    extensions = [
+        Extension(
+            "qdsim_cython.solvers.fixed_open_system_solver",
+            ["qdsim_cython/solvers/fixed_open_system_solver.pyx"],
+            include_dirs=[numpy.get_include()],
+            extra_compile_args=["-O3", "-ffast-math", "-march=native"],
+            extra_link_args=["-O3"],
+            language="c++"
+        ),
+        Extension(
+            "qdsim_cython.memory.advanced_memory_manager",
+            ["qdsim_cython/memory/advanced_memory_manager.pyx"],
+            include_dirs=[numpy.get_include()],
+            extra_compile_args=["-O3", "-ffast-math"],
+            language="c++"
+        ),
+        Extension(
+            "qdsim_cython.materials",
+            ["qdsim_cython/materials.pyx"],
+            include_dirs=[numpy.get_include()],
+            extra_compile_args=["-O3"],
+            language="c++"
+        )
+    ]
 
 setup(
     name="qdsim",
@@ -145,7 +155,7 @@ setup(
             "cdivision": True,
             "embedsignature": True,
         }
-    ),
+    ) if CYTHON_AVAILABLE and extensions else [],
     include_package_data=True,
     package_data={
         "qdsim_cython": ["*.pyx", "*.pxd", "*.h"],

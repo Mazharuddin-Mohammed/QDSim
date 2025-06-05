@@ -4,6 +4,7 @@ requires = [
     "wheel",
     "Cython>=0.29.0",
     "numpy>=1.19.0",
+    "setuptools-scm",
 ]
 build-backend = "setuptools.build_meta"
 

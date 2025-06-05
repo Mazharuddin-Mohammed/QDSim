@@ -36,6 +36,20 @@ extensions = [
 templates_path = ['_templates']
 exclude_patterns = []
 
+# Mock imports for modules that might not be available during documentation build
+autodoc_mock_imports = [
+    'qdsim_cython',
+    'qdsim_cython.solvers',
+    'qdsim_cython.solvers.fixed_open_system_solver',
+    'qdsim_cython.memory',
+    'qdsim_cython.memory.advanced_memory_manager',
+    'qdsim_cython.materials',
+    'qdsim_cython.visualization',
+    'qdsim_cython.visualization.wavefunction_plotter',
+    'cupy',
+    'pycuda',
+]
+
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
